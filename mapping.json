@@ -1,0 +1,22 @@
+{
+    "_comment": "왼쪽: DB 컬럼명, 오른쪽: 값 경로",
+    "_syntax": {
+        "topic":         "MQTT 토픽 문자열 → 'topic'",
+        "payload.*":     "페이로드 중첩 필드 → 'payload.fieldname'",
+        "__received_at__": "수집기 수신 시각 (자동 생성)",
+        "__payload__":   "원본 페이로드 전체 (자동 생성)",
+        "__topic_site__":   "토픽 파싱 → site",
+        "__topic_device__": "토픽 파싱 → device",
+        "__topic_sensor__": "토픽 파싱 → sensor"
+    },
+    "mapping": {
+        "topic":       "topic",
+        "site":        "__topic_site__",
+        "device":      "__topic_device__",
+        "sensor":      "__topic_sensor__",
+        "value":       "payload.value",
+        "ts":          "payload.ts",
+        "received_at": "__received_at__",
+        "payload":     "__payload__"
+    }
+}

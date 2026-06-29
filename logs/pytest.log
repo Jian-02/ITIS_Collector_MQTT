@@ -1,0 +1,22 @@
+2026-06-29 09:30:19 [FileQueue] INFO PQ 용량 제한: 1 MB
+2026-06-29 09:30:19 [FileQueue] INFO PQ 용량 제한: 1 MB
+2026-06-29 09:30:19 [FileQueue] INFO PQ 용량 제한: 1 MB
+2026-06-29 09:30:19 [FileQueue] INFO PQ 용량 제한: 1 MB
+2026-06-29 09:30:19 [FileQueue] INFO PQ 용량 제한: 1 MB
+2026-06-29 09:30:19 [FileQueue] WARNING 파싱 실패 라인 스킵: NOT_JSON
+2026-06-29 09:30:19 [FileQueue] INFO PQ 용량 제한: 비활성화
+2026-06-29 09:30:19 [FileQueue] INFO PQ 용량 제한: 0 MB
+2026-06-29 09:30:19 [FileQueue] WARNING PQ 용량 초과 — 1줄 drop (0.1 KB 확보)
+2026-06-29 09:30:19 [FileQueue] WARNING PQ 용량 초과 — 1줄 drop (0.1 KB 확보)
+2026-06-29 09:30:19 [FileQueue] WARNING PQ 용량 초과 — 1줄 drop (0.1 KB 확보)
+2026-06-29 09:30:19 [FileQueue] INFO PQ 용량 제한: 1 MB
+2026-06-29 09:30:19 [PayloadMapper] INFO 매핑 로드 완료: C:\Users\tonea\AppData\Local\Temp\tmpb8_dnbpx.json (1개 컬럼)
+2026-06-29 09:30:19 [PayloadMapper] INFO 매핑 로드 완료: C:\Users\tonea\AppData\Local\Temp\tmplvls5ei9.json (1개 컬럼)
+2026-06-29 09:30:19 [PayloadMapper] INFO 매핑 로드 완료: C:\Users\tonea\AppData\Local\Temp\tmplhdtnn9u.json (1개 컬럼)
+2026-06-29 09:30:19 [PayloadMapper] INFO 매핑 로드 완료: C:\Users\tonea\AppData\Local\Temp\tmpo7nloywg.json (1개 컬럼)
+2026-06-29 09:30:19 [PayloadMapper] INFO 매핑 로드 완료: C:\Users\tonea\AppData\Local\Temp\tmpm6bb70ev.json (1개 컬럼)
+2026-06-29 09:30:19 [PayloadMapper] INFO 매핑 로드 완료: C:\Users\tonea\AppData\Local\Temp\tmpxpsh9_66.json (1개 컬럼)
+2026-06-29 09:30:19 [PayloadMapper] INFO 매핑 로드 완료: C:\Users\tonea\AppData\Local\Temp\tmp0lggxrra.json (1개 컬럼)
+2026-06-29 09:30:19 [PayloadMapper] INFO 매핑 로드 완료: C:\Users\tonea\AppData\Local\Temp\tmp5i7s6bck.json (1개 컬럼)
+2026-06-29 09:30:19 [PayloadMapper] INFO 매핑 로드 완료: C:\Users\tonea\AppData\Local\Temp\tmpyed_5c8f.json (1개 컬럼)
+2026-06-29 09:30:19 [PayloadMapper] INFO 매핑 로드 완료: C:\itis_collector_mqtt\mapping.json (8개 컬럼)
