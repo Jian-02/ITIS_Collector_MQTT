@@ -10,7 +10,13 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+env_mode = os.getenv("APP_ENV", "production").strip().lower()
+
+# Check the environment(Production or Test)
+if env_mode == "test":
+    load_dotenv(dotenv_path=".env.test", override=True)
+else:
+    load_dotenv(dotenv_path=".env")
 
 
 def _get(key: str, default: str = "") -> str:
@@ -72,6 +78,7 @@ class DBConfig:
     name:         str = ""
     user:         str = ""
     password:     str = ""
+    table_name:   str = "sensor_data"
     mssql_driver: str = "ODBC Driver 17 for SQL Server"  # MSSQL only
 
     @classmethod
@@ -89,6 +96,7 @@ class DBConfig:
             name         = _get("DB_NAME", ""),
             user         = _get("DB_USER", ""),
             password     = _get("DB_PASSWORD", ""),
+            table_name   = _get("DB_TABLE_NAME", "sensor_data"),
             mssql_driver = _get("MSSQL_DRIVER", "ODBC Driver 17 for SQL Server"),
         )
 

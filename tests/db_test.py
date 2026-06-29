@@ -28,15 +28,16 @@ class DBConnectionTest:
         assert db_adapter._conn is not None
 
     def test_ensure_table_creates_sensor_data(self, clean_test_table):
-        """sensor_data table should be created."""
+        """sensor_data_test table should be created."""
         adapter = clean_test_table
         db_type = DBConfig.from_env().db_type
+        table_name = adapter.table_name
         cur     = adapter._conn.cursor()
 
         check_sql = {
-            "postgresql": "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'sensor_data';",
-            "mssql":      "SELECT COUNT(*) FROM sysobjects WHERE name='sensor_data' AND xtype='U';",
-            "oracle":     "SELECT COUNT(*) FROM user_tables WHERE table_name = 'SENSOR_DATA';",
+            "postgresql": f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_name}';",
+            "mssql":      f"SELECT COUNT(*) FROM sysobjects WHERE name='{table_name}' AND xtype='U';",
+            "oracle":     f"SELECT COUNT(*) FROM user_tables WHERE table_name = '{table_name.upper()}';",
         }
 
         cur.execute(check_sql[db_type])
@@ -75,7 +76,7 @@ SAMPLE_ROWS = [
 
 def _count_rows(adapter, where: str = "") -> int:
     cur = adapter._conn.cursor()
-    cur.execute(f"SELECT COUNT(*) FROM sensor_data{where};")
+    cur.execute(f"SELECT COUNT(*) FROM {adapter.table_name}{where};")
     count = cur.fetchone()[0]
     cur.close()
     return count

@@ -11,7 +11,17 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# 2. 최상단: .env.test 파일을 시스템 환경 변수에 즉시 주입 (override=True로 운영값 덮어쓰기)
+env_test_path = Path(__file__).parent.parent / ".env.test"
+if env_test_path.exists():
+    load_dotenv(dotenv_path=env_test_path, override=True)
+    os.environ["APP_ENV"] = "test"  # config.py 분기용 스위치
+
+from config import DBConfig
 
 # ── Mock external libraries (fallback for missing installations) ──
 for mod in ["paho", "paho.mqtt", "paho.mqtt.client"]:
@@ -22,18 +32,22 @@ for mod in ["paho", "paho.mqtt", "paho.mqtt.client"]:
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-# ── .env.test Load ───────────────────────────────────────
-def pytest_configure(config):
-    env_test = Path(__file__).parent.parent / ".env.test"
-    if env_test.exists():
-        load_dotenv(env_test, override=True)
+# ── Test DB Load ───────────────────────────────────────
+def test_db_loader(default: str = "sensor_data_test") -> str:
+    # 이제 여기서는 안전하게 테스트 DB 설정이 적용됩니다.
+    cfg = DBConfig.from_env() 
+    print("현재 로드된 테이블명:", os.getenv("DB_TABLE_NAME"))
+    print("현재 APP_ENV 상태:", os.getenv("APP_ENV"))
+    assert cfg.table_name == "sensor_data_test"  # .env.test에 지정한 테이블명
+    return default
+
 # ── Common Util ────────────────────────────────────────────
 def _truncate_table(adapter, db_type: str):
     # Delete only data. Maintain data structure"
     truncate_sql = {
-        "postgresql": "TRUNCATE TABLE sensor_data;",
-        "mssql": "TRUNCATE TABLE sensor_data;",
-        "oracle": "TRUNCATE TABLE sensor_data;",
+        "postgresql": f"TRUNCATE TABLE {adapter.table_name};",
+        "mssql": f"TRUNCATE TABLE {adapter.table_name};",
+        "oracle": f"TRUNCATE TABLE {adapter.table_name};",
     }
     cur = adapter._conn.cursor()
     cur.execute(truncate_sql[db_type])
@@ -86,6 +100,7 @@ def db_adapter():
     from loader import make_adapter
 
     cfg = DBConfig.from_env()
+    cfg.table_name = test_db_loader()
     adapter = make_adapter(cfg)
 
     try:

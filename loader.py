@@ -6,6 +6,7 @@ Supports PostgreSQL, MSSQL, and Oracle.
 
 import json
 import logging
+import re
 import time
 from abc import ABC, abstractmethod
 
@@ -19,7 +20,7 @@ from file_queue import FileQueue
 
 CREATE_TABLE = {
     "postgresql": """
-        CREATE TABLE IF NOT EXISTS sensor_data (
+        CREATE TABLE IF NOT EXISTS {table} (
             id          BIGSERIAL PRIMARY KEY,
             topic       TEXT,
             site        TEXT,
@@ -30,17 +31,17 @@ CREATE_TABLE = {
             received_at TIMESTAMPTZ,
             payload     JSONB
         );
-        CREATE INDEX IF NOT EXISTS idx_sensor_data_ts
-            ON sensor_data (ts DESC);
-        CREATE INDEX IF NOT EXISTS idx_sensor_data_device
-            ON sensor_data (site, device, sensor);
+        CREATE INDEX IF NOT EXISTS {idx_prefix}_ts
+            ON {table} (ts DESC);
+        CREATE INDEX IF NOT EXISTS {idx_prefix}_device
+            ON {table} (site, device, sensor);
     """,
     "mssql": """
         IF NOT EXISTS (
-            SELECT 1 FROM sysobjects WHERE name='sensor_data' AND xtype='U'
+            SELECT 1 FROM sysobjects WHERE name='{table}' AND xtype='U'
         )
         BEGIN
-            CREATE TABLE sensor_data (
+            CREATE TABLE {table} (
                 id          BIGINT IDENTITY(1,1) PRIMARY KEY,
                 topic       NVARCHAR(MAX),
                 site        NVARCHAR(255),
@@ -51,10 +52,10 @@ CREATE_TABLE = {
                 received_at DATETIMEOFFSET,
                 payload     NVARCHAR(MAX)
             );
-            CREATE INDEX idx_sensor_data_ts
-                ON sensor_data (ts DESC);
-            CREATE INDEX idx_sensor_data_device
-                ON sensor_data (site, device, sensor);
+            CREATE INDEX {idx_prefix}_ts
+                ON {table} (ts DESC);
+            CREATE INDEX {idx_prefix}_device
+                ON {table} (site, device, sensor);
         END
     """,
     "oracle": """
@@ -62,10 +63,10 @@ CREATE_TABLE = {
             v_count INTEGER;
         BEGIN
             SELECT COUNT(*) INTO v_count
-            FROM user_tables WHERE table_name = 'SENSOR_DATA';
+            FROM user_tables WHERE table_name = '{table_upper}';
             IF v_count = 0 THEN
                 EXECUTE IMMEDIATE '
-                    CREATE TABLE sensor_data (
+                    CREATE TABLE {table} (
                         id          NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                         topic       CLOB,
                         site        VARCHAR2(255),
@@ -78,9 +79,9 @@ CREATE_TABLE = {
                     )
                 ';
                 EXECUTE IMMEDIATE
-                    'CREATE INDEX idx_sensor_ts ON sensor_data (ts DESC)';
+                    'CREATE INDEX {idx_prefix}_ts ON {table} (ts DESC)';
                 EXECUTE IMMEDIATE
-                    'CREATE INDEX idx_sensor_device ON sensor_data (site, device, sensor)';
+                    'CREATE INDEX {idx_prefix}_device ON {table} (site, device, sensor)';
             END IF;
         END;
     """,
@@ -88,21 +89,38 @@ CREATE_TABLE = {
 
 INSERT_SQL = {
     "postgresql": """
-        INSERT INTO sensor_data
+        INSERT INTO {table}
             (topic, site, device, sensor, value, ts, received_at, payload)
         VALUES %s
     """,
     "mssql": """
-        INSERT INTO sensor_data
+        INSERT INTO {table}
             (topic, site, device, sensor, value, ts, received_at, payload)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """,
     "oracle": """
-        INSERT INTO sensor_data
+        INSERT INTO {table}
             (topic, site, device, sensor, value, ts, received_at, payload)
         VALUES (:1, :2, :3, :4, :5, :6, :7, :8)
     """,
 }
+
+_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _validate_identifier(name: str) -> str:
+    if not _IDENTIFIER.fullmatch(name):
+        raise ValueError(f"Invalid DB table name: {name}")
+    return name
+
+
+def _format_sql(template: str, table_name: str) -> str:
+    table = _validate_identifier(table_name)
+    return template.format(
+        table=table,
+        table_upper=table.upper(),
+        idx_prefix=f"idx_{table}",
+    )
 
 
 # ══════════════════════════════════════════════════════════
@@ -114,7 +132,14 @@ class BaseDBAdapter(ABC):
 
     def __init__(self, cfg: DBConfig):
         self.cfg = cfg
+        self.table_name = _validate_identifier(cfg.table_name)
         self.log = logging.getLogger(self.__class__.__name__)
+
+    def _create_table_sql(self) -> str:
+        return _format_sql(CREATE_TABLE[self.cfg.db_type], self.table_name)
+
+    def _insert_sql(self) -> str:
+        return _format_sql(INSERT_SQL[self.cfg.db_type], self.table_name)
 
     @abstractmethod
     def connect(self): ...
@@ -142,13 +167,13 @@ class PostgreSQLAdapter(BaseDBAdapter):
 
     def ensure_table(self):
         with self._conn.cursor() as cur:
-            cur.execute(CREATE_TABLE["postgresql"])
+            cur.execute(self._create_table_sql())
         self._conn.commit()
 
     def insert_batch(self, rows: list[tuple]):
         import psycopg2.extras
         with self._conn.cursor() as cur:
-            psycopg2.extras.execute_values(cur, INSERT_SQL["postgresql"], rows)
+            psycopg2.extras.execute_values(cur, self._insert_sql(), rows)
         self._conn.commit()
 
     def close(self):
@@ -172,13 +197,13 @@ class MSSQLAdapter(BaseDBAdapter):
 
     def ensure_table(self):
         cur = self._conn.cursor()
-        cur.execute(CREATE_TABLE["mssql"])
+        cur.execute(self._create_table_sql())
         self._conn.commit()
         cur.close()
 
     def insert_batch(self, rows: list[tuple]):
         cur = self._conn.cursor()
-        cur.executemany(INSERT_SQL["mssql"], rows)
+        cur.executemany(self._insert_sql(), rows)
         self._conn.commit()
         cur.close()
 
@@ -197,13 +222,13 @@ class OracleAdapter(BaseDBAdapter):
 
     def ensure_table(self):
         cur = self._conn.cursor()
-        cur.execute(CREATE_TABLE["oracle"])
+        cur.execute(self._create_table_sql())
         self._conn.commit()
         cur.close()
 
     def insert_batch(self, rows: list[tuple]):
         cur = self._conn.cursor()
-        cur.executemany(INSERT_SQL["oracle"], rows)
+        cur.executemany(self._insert_sql(), rows)
         self._conn.commit()
         cur.close()
 
