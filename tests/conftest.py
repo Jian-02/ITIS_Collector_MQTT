@@ -117,8 +117,8 @@ def db_adapter():
 @pytest.fixture(scope="function")
 def clean_test_table(db_adapter):
     """
-    Rest table data before each test runs.
-    Maintain Table Schema
+    Keep table data so test inserts can be inspected after pytest finishes.
+    Maintain table schema.
     """
     from config import DBConfig
 

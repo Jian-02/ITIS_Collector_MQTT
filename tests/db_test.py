@@ -73,53 +73,56 @@ SAMPLE_ROWS = [
 ]
 
 
+def _count_rows(adapter, where: str = "") -> int:
+    cur = adapter._conn.cursor()
+    cur.execute(f"SELECT COUNT(*) FROM sensor_data{where};")
+    count = cur.fetchone()[0]
+    cur.close()
+    return count
+
+
 class DBInsertTest:
 
     def test_insert_single_row(self, clean_test_table):
         """A single inserted record should be queryable."""
         adapter = clean_test_table
+        before = _count_rows(adapter)
         adapter.insert_batch([SAMPLE_ROWS[0]])
 
-        cur = adapter._conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM sensor_data;")
-        count = cur.fetchone()[0]
-        cur.close()
-        assert count == 1
+        assert _count_rows(adapter) == before + 1
 
     def test_insert_multiple_rows(self, clean_test_table):
         """After inserting multiple records, the total count should match."""
         adapter = clean_test_table
+        before = _count_rows(adapter)
         adapter.insert_batch(SAMPLE_ROWS)
 
-        cur = adapter._conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM sensor_data;")
-        count = cur.fetchone()[0]
-        cur.close()
-        assert count == len(SAMPLE_ROWS)
+        assert _count_rows(adapter) == before + len(SAMPLE_ROWS)
 
     def test_inserted_value_is_correct(self, clean_test_table):
         """Inserted value should be correct."""
         adapter = clean_test_table
+        before = _count_rows(adapter, " WHERE topic = 'factory/line1/temp' AND value = 23.5")
         adapter.insert_batch([SAMPLE_ROWS[0]])
 
-        cur = adapter._conn.cursor()
-        cur.execute("SELECT value FROM sensor_data;")
-        row = cur.fetchone()
-        cur.close()
-        assert row[0] == 23.5
+        after = _count_rows(adapter, " WHERE topic = 'factory/line1/temp' AND value = 23.5")
+        assert after == before + 1
 
     def test_insert_empty_batch_does_not_raise(self, clean_test_table):
         """Inserting an empty batch should not raise an error."""
         adapter = clean_test_table
+        before = _count_rows(adapter)
         try:
             if SAMPLE_ROWS:  # Explicitly call with an empty list
                 adapter.insert_batch([])
         except Exception as e:
             pytest.fail(f"빈 배치 INSERT 에러: {e}")
+        assert _count_rows(adapter) == before
 
     def test_insert_null_value_allowed(self, clean_test_table):
         """Rows with value=None should be inserted."""
         adapter = clean_test_table
+        before = _count_rows(adapter, " WHERE value IS NULL")
         null_row = (
             "factory/line1/temp",
             "factory", "line1", "temp",
@@ -130,15 +133,12 @@ class DBInsertTest:
         )
         adapter.insert_batch([null_row])
 
-        cur = adapter._conn.cursor()
-        cur.execute("SELECT value FROM sensor_data;")
-        row = cur.fetchone()
-        cur.close()
-        assert row[0] is None
+        assert _count_rows(adapter, " WHERE value IS NULL") == before + 1
 
     def test_insert_large_batch(self, clean_test_table):
         """A large batch of 1,000 rows should be inserted successfully."""
         adapter = clean_test_table
+        before = _count_rows(adapter)
         rows = [
             (
                 f"factory/line1/sensor{i}",
@@ -152,11 +152,7 @@ class DBInsertTest:
         ]
         adapter.insert_batch(rows)
 
-        cur = adapter._conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM sensor_data;")
-        count = cur.fetchone()[0]
-        cur.close()
-        assert count == 1000
+        assert _count_rows(adapter) == before + 1000
 
 
 # ══════════════════════════════════════════════════════════
