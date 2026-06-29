@@ -1,7 +1,7 @@
 """
 loader.py
-FileQueue를 폴링하여 DB에 배치 적재한다.
-PostgreSQL / MSSQL / Oracle 지원.
+Polls FileQueue and loads records into the database in batches.
+Supports PostgreSQL, MSSQL, and Oracle.
 """
 
 import json
@@ -14,7 +14,7 @@ from file_queue import FileQueue
 
 
 # ══════════════════════════════════════════════════════════
-# DDL / DML (DB별)
+# DDL / DML by database
 # ══════════════════════════════════════════════════════════
 
 CREATE_TABLE = {
@@ -106,11 +106,11 @@ INSERT_SQL = {
 
 
 # ══════════════════════════════════════════════════════════
-# DB 어댑터 (추상 + 구현)
+# DB adapters (abstract base and implementations)
 # ══════════════════════════════════════════════════════════
 
 class BaseDBAdapter(ABC):
-    """DB별 연결·DDL·INSERT 차이를 캡슐화한다."""
+    """Encapsulates database-specific connection, DDL, and INSERT behavior."""
 
     def __init__(self, cfg: DBConfig):
         self.cfg = cfg
@@ -225,7 +225,7 @@ def make_adapter(cfg: DBConfig) -> BaseDBAdapter:
 # ══════════════════════════════════════════════════════════
 
 class DBLoader:
-    """FileQueue를 폴링하여 DB에 배치 적재한다."""
+    """Polls FileQueue and loads records into the database in batches."""
 
     def __init__(self, db_cfg: DBConfig, loader_cfg: LoaderConfig, queue: FileQueue):
         self.db_cfg     = db_cfg

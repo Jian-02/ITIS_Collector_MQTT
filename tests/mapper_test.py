@@ -1,6 +1,6 @@
 """
 tests/mapper_test.py
-PayloadMapper 테스트
+PayloadMapper tests
 """
 
 import json
@@ -97,7 +97,7 @@ class ValidationTest(unittest.TestCase):
 class EndToEndTest(unittest.TestCase):
 
     def test_full_default_mapping(self):
-        """실제 mapping.json 기본값으로 end-to-end 검증"""
+        """Validates end-to-end behavior with the default mapping.json."""
         mapping_path = Path(__file__).parent.parent / "mapping.json"
         mapper  = PayloadMapper(mapping_path)
         payload = {"value": 99.9, "ts": "2026-06-01T12:00:00Z"}

@@ -1,6 +1,6 @@
 """
 config.py
-.env 파일을 읽어 전체 설정을 제공한다.
+Loads .env values and provides application configuration.
 """
 
 import logging
@@ -42,13 +42,13 @@ class MQTTConfig:
         )
 
 
-# ── 파일 PQ ─────────────────────────────────────────────
+# --- File PQ ------------------------------------------------
 
 @dataclass
 class QueueConfig:
     path:               Path = Path("./pq/queue.jsonl")
     size_limit_enabled: bool = True
-    max_bytes:          int  = 100 * 1024 * 1024   # size_limit_enabled=True 일 때만 적용
+    max_bytes:          int  = 100 * 1024 * 1024   # Applied only when size_limit_enabled=True
 
     @classmethod
     def from_env(cls) -> "QueueConfig":
@@ -72,7 +72,7 @@ class DBConfig:
     name:         str = ""
     user:         str = ""
     password:     str = ""
-    mssql_driver: str = "ODBC Driver 17 for SQL Server"  # MSSQL 전용
+    mssql_driver: str = "ODBC Driver 17 for SQL Server"  # MSSQL only
 
     @classmethod
     def from_env(cls) -> "DBConfig":
@@ -108,7 +108,7 @@ class LoaderConfig:
         )
 
 
-# ── 로그 ────────────────────────────────────────────────
+# --- Logging -----------------------------------------------
 
 def get_log_level() -> int:
     return getattr(logging, _get("LOG_LEVEL", "INFO").upper(), logging.INFO)
@@ -132,8 +132,8 @@ class MapperConfig:
 @dataclass
 class LogConfig:
     log_dir:       Path = Path("./logs")
-    max_bytes:     int  = 100 * 1024 * 1024  # 파일당 최대 용량
-    max_files:     int  = 30                  # 최대 보관 파일 수
+    max_bytes:     int  = 100 * 1024 * 1024  # Maximum size per file
+    max_files:     int  = 30                  # Maximum number of retained files
     level:         int  = logging.INFO
 
     @classmethod

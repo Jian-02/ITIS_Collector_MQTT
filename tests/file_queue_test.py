@@ -1,6 +1,6 @@
 """
 tests/file_queue_test.py
-FileQueue 테스트
+FileQueue tests
 """
 
 import json
@@ -50,7 +50,7 @@ class AppendFlushTest(unittest.TestCase):
         self.assertEqual(q.flush(), [])
 
     def test_lines_appended_after_flush_are_preserved(self):
-        """flush 이후 append된 줄은 다음 flush 때 반환돼야 한다."""
+        """Lines appended after flush should be returned by the next flush."""
         q = _make_queue(self.tmp)
         q.append({"pre": 1})
         q.flush()

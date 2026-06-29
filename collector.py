@@ -1,6 +1,6 @@
 """
 collector.py
-MQTT 브로커를 구독하여 수신 메시지를 FileQueue에 저장한다.
+Subscribes to an MQTT broker and stores received messages in FileQueue.
 """
 
 import json

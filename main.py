@@ -1,8 +1,8 @@
 """
 main.py
-수집기(MQTTCollector)와 적재기(DBLoader)를 띄우는 진입점.
+Entry point that starts MQTTCollector and DBLoader.
 
-실행: python main.py
+Run with: python main.py
 """
 
 import threading
@@ -25,7 +25,7 @@ def main():
     t = threading.Thread(target=loader.run, daemon=True, name="loader")
     t.start()
 
-    collector.run()  # 메인 스레드 블로킹
+    collector.run()  # Blocks the main thread
 
 
 if __name__ == "__main__":

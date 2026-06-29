@@ -1,6 +1,6 @@
 """
 file_queue.py
-JSONL 기반 파일 PQ.
+JSONL-backed file priority queue.
 """
 
 import json
@@ -13,11 +13,11 @@ from config import QueueConfig
 
 class FileQueue:
     """
-    JSONL 기반 파일 PQ.
+    JSONL-backed file priority queue.
 
-    - append() : 레코드를 파일 끝에 추가
-    - flush()  : 현재까지 쌓인 레코드 반환 + 해당 줄 파일에서 제거
-    - size_limit_enabled=True 일 때만 용량 초과 시 오래된 줄부터 drop
+    - append(): Adds a record to the end of the file.
+    - flush(): Returns accumulated records and removes those lines from the file.
+    - When size_limit_enabled=True, drops the oldest lines only if the file exceeds the size limit.
     """
 
     def __init__(self, cfg: QueueConfig):
@@ -49,8 +49,8 @@ class FileQueue:
 
     def flush(self) -> list[dict]:
         """
-        현재까지 쌓인 레코드를 모두 반환하고 해당 줄을 파일에서 제거한다.
-        flush 이후 append된 줄은 보존된다.
+        Returns all accumulated records and removes those lines from the file.
+        Lines appended after flush starts are preserved.
         """
         with self._lock:
             if self.path.stat().st_size == 0:
@@ -78,7 +78,7 @@ class FileQueue:
             return records
 
     def _drop_oldest(self, needed_bytes: int):
-        """용량 확보를 위해 파일 앞쪽 줄을 제거한다."""
+        """Removes lines from the beginning of the file to free space."""
         with open(self.path, "r", encoding="utf-8") as f:
             lines = f.readlines()
 

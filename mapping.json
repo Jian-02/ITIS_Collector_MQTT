@@ -1,13 +1,13 @@
 {
-    "_comment": "왼쪽: DB 컬럼명, 오른쪽: 값 경로",
+    "_comment": "Left: DB column name, right: value path",
     "_syntax": {
-        "topic":         "MQTT 토픽 문자열 → 'topic'",
-        "payload.*":     "페이로드 중첩 필드 → 'payload.fieldname'",
-        "__received_at__": "수집기 수신 시각 (자동 생성)",
-        "__payload__":   "원본 페이로드 전체 (자동 생성)",
-        "__topic_site__":   "토픽 파싱 → site",
-        "__topic_device__": "토픽 파싱 → device",
-        "__topic_sensor__": "토픽 파싱 → sensor"
+        "topic":         "MQTT topic string -> 'topic'",
+        "payload.*":     "Nested payload field -> 'payload.fieldname'",
+        "__received_at__": "Collector receive timestamp (auto-generated)",
+        "__payload__":   "Original full payload (auto-generated)",
+        "__topic_site__":   "Parsed topic -> site",
+        "__topic_device__": "Parsed topic -> device",
+        "__topic_sensor__": "Parsed topic -> sensor"
     },
     "mapping": {
         "topic":       "topic",

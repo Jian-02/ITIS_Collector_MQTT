@@ -1,6 +1,6 @@
 """
 mapper.py
-mapping.json 을 읽어 MQTT 메시지를 DB 레코드로 변환한다.
+Reads mapping.json and converts MQTT messages into database records.
 """
 
 import json
@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 
 
-# ── 예약어 ───────────────────────────────────────────────
+# --- Reserved keywords -------------------------------------
 _RESERVED = {
     "__received_at__",
     "__payload__",
@@ -20,16 +20,16 @@ _RESERVED = {
 
 class PayloadMapper:
     """
-    mapping.json 정의에 따라 MQTT 메시지 → dict 레코드로 변환한다.
+    Converts MQTT messages into dict records according to mapping.json.
 
-    지원 경로 표현:
-      "topic"            → MQTT 토픽 문자열
-      "payload.field"    → 페이로드 중첩 필드 (payload.a.b.c 가능)
-      "__received_at__"  → 수집기 수신 시각
-      "__payload__"      → 원본 페이로드 전체
-      "__topic_site__"   → 토픽 파싱 site
-      "__topic_device__" → 토픽 파싱 device
-      "__topic_sensor__" → 토픽 파싱 sensor
+    Supported source paths:
+      "topic"            -> MQTT topic string
+      "payload.field"    -> Nested payload field (payload.a.b.c is supported)
+      "__received_at__"  -> Collector receive timestamp
+      "__payload__"      -> Original full payload
+      "__topic_site__"   -> Parsed topic site
+      "__topic_device__" -> Parsed topic device
+      "__topic_sensor__" -> Parsed topic sensor
     """
 
     def __init__(self, mapping_path: Path):
@@ -54,7 +54,7 @@ class PayloadMapper:
         topic_meta: dict,
         received_at: str,
     ) -> dict:
-        """매핑 정의에 따라 레코드 dict 를 생성한다."""
+        """Builds a record dict according to the mapping definition."""
         reserved_values = {
             "__received_at__":  received_at,
             "__payload__":      payload,
@@ -72,13 +72,13 @@ class PayloadMapper:
             elif src.startswith("payload."):
                 record[col] = self._dig(payload, src[len("payload."):])
             else:
-                # 페이로드 최상위 필드 직접 참조
+                # Directly reference a top-level payload field
                 record[col] = payload.get(src)
 
         return record
 
     def _dig(self, data: dict, path: str):
-        """점(.) 구분 경로로 중첩 dict 값을 꺼낸다. 없으면 None."""
+        """Reads a nested dict value using a dot-separated path. Returns None if missing."""
         keys = path.split(".")
         cur  = data
         for key in keys:

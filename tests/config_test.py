@@ -1,6 +1,6 @@
 """
 tests/config_test.py
-Config dataclass 테스트
+Config dataclass tests
 """
 
 import sys

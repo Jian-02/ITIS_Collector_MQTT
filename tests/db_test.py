@@ -1,7 +1,7 @@
 """
 tests/db_test.py
-실제 DB 연결 통합 테스트.
-.env.test 의 접속 정보를 사용하며, 연결 실패 시 자동 skip.
+Integration tests for real database connections.
+Uses connection settings from .env.test and automatically skips when the connection fails.
 """
 
 import json
@@ -18,17 +18,17 @@ from loader import make_adapter
 
 
 # ══════════════════════════════════════════════════════════
-# DB 연결 테스트
+# DB connection tests
 # ══════════════════════════════════════════════════════════
 
 class DBConnectionTest:
 
     def test_connection_success(self, db_adapter):
-        """DB 연결이 성공해야 한다."""
+        """Database connection should succeed."""
         assert db_adapter._conn is not None
 
     def test_ensure_table_creates_sensor_data(self, clean_test_table):
-        """sensor_data 테이블이 생성되어야 한다."""
+        """sensor_data table should be created."""
         adapter = clean_test_table
         db_type = DBConfig.from_env().db_type
         cur     = adapter._conn.cursor()
@@ -46,7 +46,7 @@ class DBConnectionTest:
 
 
 # ══════════════════════════════════════════════════════════
-# INSERT 테스트
+# INSERT tests
 # ══════════════════════════════════════════════════════════
 
 SAMPLE_ROWS = [
@@ -76,7 +76,7 @@ SAMPLE_ROWS = [
 class DBInsertTest:
 
     def test_insert_single_row(self, clean_test_table):
-        """단일 레코드 INSERT 후 조회되어야 한다."""
+        """A single inserted record should be queryable."""
         adapter = clean_test_table
         adapter.insert_batch([SAMPLE_ROWS[0]])
 
@@ -87,7 +87,7 @@ class DBInsertTest:
         assert count == 1
 
     def test_insert_multiple_rows(self, clean_test_table):
-        """다중 레코드 INSERT 후 전체 수가 맞아야 한다."""
+        """After inserting multiple records, the total count should match."""
         adapter = clean_test_table
         adapter.insert_batch(SAMPLE_ROWS)
 
@@ -98,7 +98,7 @@ class DBInsertTest:
         assert count == len(SAMPLE_ROWS)
 
     def test_inserted_value_is_correct(self, clean_test_table):
-        """INSERT된 value 값이 정확해야 한다."""
+        """Inserted value should be correct."""
         adapter = clean_test_table
         adapter.insert_batch([SAMPLE_ROWS[0]])
 
@@ -109,16 +109,16 @@ class DBInsertTest:
         assert row[0] == 23.5
 
     def test_insert_empty_batch_does_not_raise(self, clean_test_table):
-        """빈 배치 INSERT 시 에러가 없어야 한다."""
+        """Inserting an empty batch should not raise an error."""
         adapter = clean_test_table
         try:
-            if SAMPLE_ROWS:  # 빈 리스트로 명시 호출
+            if SAMPLE_ROWS:  # Explicitly call with an empty list
                 adapter.insert_batch([])
         except Exception as e:
             pytest.fail(f"빈 배치 INSERT 에러: {e}")
 
     def test_insert_null_value_allowed(self, clean_test_table):
-        """value 가 None 이어도 INSERT 되어야 한다."""
+        """Rows with value=None should be inserted."""
         adapter = clean_test_table
         null_row = (
             "factory/line1/temp",
@@ -137,7 +137,7 @@ class DBInsertTest:
         assert row[0] is None
 
     def test_insert_large_batch(self, clean_test_table):
-        """대량 배치(1000건) INSERT 가 정상 처리되어야 한다."""
+        """A large batch of 1,000 rows should be inserted successfully."""
         adapter = clean_test_table
         rows = [
             (
@@ -160,7 +160,7 @@ class DBInsertTest:
 
 
 # ══════════════════════════════════════════════════════════
-# pytest 클래스에 fixture 주입
+# Inject fixtures into pytest classes
 # ══════════════════════════════════════════════════════════
 
 class TestDBConnection(DBConnectionTest):
