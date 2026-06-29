@@ -2,6 +2,14 @@
 loader.py
 Polls FileQueue and loads records into the database in batches.
 Supports PostgreSQL, MSSQL, and Oracle.
+
+2단계 커밋 흐름
+──────────────────────────────────────────────────
+  1. queue.peek()          → Queued 레코드 읽기 + 파일 내 상태를 Pending으로 전환
+  2. adapter.insert_batch()→ DB INSERT 시도
+  3. 성공 → queue.commit()  : Pending 줄 파일에서 제거
+     실패 → queue.rollback(): Pending 줄을 Queued로 복원 후 재연결 대기
+──────────────────────────────────────────────────
 """
 
 import json
@@ -250,7 +258,13 @@ def make_adapter(cfg: DBConfig) -> BaseDBAdapter:
 # ══════════════════════════════════════════════════════════
 
 class DBLoader:
-    """Polls FileQueue and loads records into the database in batches."""
+    """
+    Polls FileQueue and loads records into the database in batches.
+
+    2단계 커밋으로 데이터 유실을 방지:
+      peek() → insert_batch() → commit()   (성공 경로)
+      peek() → insert_batch() → rollback() (실패 경로)
+    """
 
     def __init__(self, db_cfg: DBConfig, loader_cfg: LoaderConfig, queue: FileQueue):
         self.db_cfg     = db_cfg
@@ -259,16 +273,30 @@ class DBLoader:
         self.log        = logging.getLogger(self.__class__.__name__)
         self._adapter   = None
 
-    def _connect(self):
+    def _connect(self, max_attempts: int = 0):
+        """
+        DB에 연결하고 테이블을 준비한다.
+
+        Parameters
+        ----------
+        max_attempts : int
+            0 (기본값) → 성공할 때까지 무한 재시도 (운영 모드)
+            1 이상     → 해당 횟수만큼만 시도 후 마지막 예외를 raise (테스트 모드)
+        """
         self._adapter = make_adapter(self.db_cfg)
+        attempt = 0
         while True:
+            attempt += 1
             try:
                 self._adapter.connect()
                 self._adapter.ensure_table()
                 self.log.info("테이블 준비 완료")
                 return
             except Exception as e:
-                self.log.warning(f"DB 연결 실패: {e} — 5초 후 재시도")
+                self.log.warning(f"DB 연결 실패 ({attempt}회): {e}")
+                if max_attempts and attempt >= max_attempts:
+                    raise
+                self.log.warning("5초 후 재시도")
                 time.sleep(5)
 
     def _to_rows(self, records: list) -> list[tuple]:
@@ -287,22 +315,28 @@ class DBLoader:
         ]
 
     def _process(self):
-        records = self.queue.flush()
+        # ── Phase 1: 큐에서 읽기 (파일 내 상태: Queued → Pending) ──
+        records = self.queue.peek()
         if not records:
             return
+
+        rows = self._to_rows(records)
+
         try:
-            rows = self._to_rows(records)
+            # ── Phase 2: DB INSERT ──────────────────────────────────
             for i in range(0, len(rows), self.loader_cfg.batch_size):
                 self._adapter.insert_batch(rows[i : i + self.loader_cfg.batch_size])
+
+            # ── Phase 3 (성공): Pending 줄 파일에서 제거 ────────────
+            self.queue.commit()
             self.log.info(f"{len(rows)}건 INSERT 완료")
-        
+
         except Exception as e:
-            #If DB Connection fails, save data as persistent queue
-            self.log.error(f"INSERT 실패, 데이터를 Persistent Queue로 되돌립니다. 오류: {e}")
-            for record in records:
-                self.queue.append(record)
-            # Re-raise the exeption for the upper run() looop or tests to catch
-            raise e
+            # ── Phase 3 (실패): Pending → Queued 복원 ───────────────
+            self.log.error(f"INSERT 실패, Pending 레코드를 Queued로 복원: {e}")
+            self.queue.rollback()
+            # run() 루프가 재연결하도록 예외를 다시 던짐
+            raise
 
     def run(self):
         self._connect()
