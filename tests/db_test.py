@@ -6,15 +6,15 @@ Uses connection settings from .env.test and automatically skips when the connect
 
 import json
 import sys
-import unittest
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import DBConfig
-from loader import make_adapter
+from config import DBConfig, LoaderConfig, QueueConfig
+from file_queue import FileQueue
+from loader import DBLoader
 
 
 # ══════════════════════════════════════════════════════════
@@ -31,7 +31,7 @@ class DBConnectionTest:
         """sensor_data_test table should be created."""
         adapter = clean_test_table
         db_type = DBConfig.from_env().db_type
-        table_name = adapter.table_name
+        table_name = DBConfig.from_env().table_name
         cur     = adapter._conn.cursor()
 
         check_sql = {
@@ -157,6 +157,59 @@ class DBInsertTest:
 
 
 # ══════════════════════════════════════════════════════════
+# DB Failover & FileQueue Backup Tests
+# ══════════════════════════════════════════════════════════
+class DBFailoverTest:
+    def test_queue_backup_on_db_failure(self, tmp_path):
+        """if DB connection fails, data must remain safe in FileQueue"""
+        # Inject invalid connection info
+        bad_db_cfg = DBConfig.from_env()
+        bad_db_cfg.host = "invalid_host_1234.com"
+        bad_db_cfg.port = 9999
+
+        queue_cfg = QueueConfig.from_env()
+        queue = FileQueue(queue_cfg)
+
+        target_path = queue_cfg.path
+        
+        # 3. Safety Check: If the real file already has data, we back it up first
+        original_content = b""
+        if target_path.exists():
+            original_content = target_path.read_bytes()
+
+        queue = FileQueue(queue_cfg)
+        
+        try:
+            # Insert a sample record into the queue
+            sample = {"topic": "test", "value": 23.5, "payload": {}}
+            queue.append(sample)
+
+            # Initialize loader
+            loader = DBLoader(bad_db_cfg, LoaderConfig(batch_size=1, poll_interval=1), queue)
+
+            try:
+                loader._connect()
+            except Exception:
+                pass
+            # Trigger process loop and catch the expected DB exception
+            try:
+                loader._process()
+            except Exception:
+                pass  # Ignore DB connection error intentionally
+
+            # 4. Verify using standard pytest assert (No assertTrue syntax error)
+            assert target_path.exists(), f"PQ file must exist at {target_path} even if DB fails."
+            assert target_path.stat().st_size > 0, "Data must be preserved in the queue."
+            
+        finally:
+            # 5. Rollback: Restore the original file state completely
+            if original_content:
+                target_path.write_bytes(original_content)
+            elif target_path.exists():
+                target_path.unlink()  # If it didn't exist before, remove it
+
+
+# ══════════════════════════════════════════════════════════
 # Inject fixtures into pytest classes
 # ══════════════════════════════════════════════════════════
 
@@ -165,4 +218,7 @@ class TestDBConnection(DBConnectionTest):
 
 
 class TestDBInsert(DBInsertTest):
+    pass
+
+class TestDBFailover(DBFailoverTest):
     pass

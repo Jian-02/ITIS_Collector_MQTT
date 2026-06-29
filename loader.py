@@ -290,10 +290,19 @@ class DBLoader:
         records = self.queue.flush()
         if not records:
             return
-        rows = self._to_rows(records)
-        for i in range(0, len(rows), self.loader_cfg.batch_size):
-            self._adapter.insert_batch(rows[i : i + self.loader_cfg.batch_size])
-        self.log.info(f"{len(rows)}건 INSERT 완료")
+        try:
+            rows = self._to_rows(records)
+            for i in range(0, len(rows), self.loader_cfg.batch_size):
+                self._adapter.insert_batch(rows[i : i + self.loader_cfg.batch_size])
+            self.log.info(f"{len(rows)}건 INSERT 완료")
+        
+        except Exception as e:
+            #If DB Connection fails, save data as persistent queue
+            self.log.error(f"INSERT 실패, 데이터를 Persistent Queue로 되돌립니다. 오류: {e}")
+            for record in records:
+                self.queue.append(record)
+            # Re-raise the exeption for the upper run() looop or tests to catch
+            raise e
 
     def run(self):
         self._connect()

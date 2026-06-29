@@ -52,14 +52,14 @@ class MQTTConfig:
 
 @dataclass
 class QueueConfig:
-    path:               Path = Path("./pq/queue.jsonl")
+    path:               Path = Path("./pq/persistent_queue.jsonl")
     size_limit_enabled: bool = True
     max_bytes:          int  = 100 * 1024 * 1024   # Applied only when size_limit_enabled=True
 
     @classmethod
     def from_env(cls) -> "QueueConfig":
         return cls(
-            path               = Path(_get("PQ_PATH", "./pq/queue.jsonl")),
+            path               = Path(_get("PQ_PATH", "./pq/persistent_queue.jsonl")),
             size_limit_enabled = _get_bool("PQ_SIZE_LIMIT_ENABLED", True),
             max_bytes          = int(_get("PQ_MAX_MB", "100")) * 1024 * 1024,
         )

@@ -8,10 +8,8 @@ create the configured database before creating the sensor_data table.
 import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
-import pytest
-from dotenv import dotenv_values, load_dotenv
+from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -22,6 +20,8 @@ if env_test_path.exists():
     os.environ["APP_ENV"] = "test"  # config.py 분기용 스위치
 
 from config import DBConfig
+from unittest.mock import MagicMock
+import pytest
 
 # ── Mock external libraries (fallback for missing installations) ──
 for mod in ["paho", "paho.mqtt", "paho.mqtt.client"]:
