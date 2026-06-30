@@ -272,6 +272,14 @@ class DBLoader:
         self.queue      = queue
         self.log        = logging.getLogger(self.__class__.__name__)
         self._adapter   = None
+        self._running = True
+
+    def stop(self):
+        self._running = False
+        self.log.info("Stopping DBLoader...")
+
+    def start(self):
+        self._running = True
 
     def _connect(self, max_attempts: int = 0):
         """
@@ -342,7 +350,7 @@ class DBLoader:
         self._connect()
         self.log.info(f"Starting polling (interval: {self.loader_cfg.poll_interval}s, DB: {self.db_cfg.db_type})")
 
-        while True:
+        while self._running:
             try:
                 self._process()
             except Exception as e:
@@ -350,3 +358,6 @@ class DBLoader:
                 self._connect()
 
             time.sleep(self.loader_cfg.poll_interval)
+        
+        self.log.info("DBLoader stopped.")
+        self._disconnect() # 루프 종료 후 DB 연결 종료 로직(필요 시)

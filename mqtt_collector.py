@@ -26,9 +26,17 @@ class MQTTCollector:
         self._client = mqtt.Client()
         self._client.on_connect = self._on_connect
         self._client.on_message = self._on_message
+        self._running = True
 
         if cfg.username:
             self._client.username_pw_set(cfg.username, cfg.password)
+
+    def stop(self):
+        self._running = False
+        self.log.info("Stopping MQTT Collector...")
+
+    def start(self):
+        self._running = True
 
     def _on_connect(self, client, userdata, flags, rc):
         if rc == 0:
@@ -66,11 +74,12 @@ class MQTTCollector:
             return {"raw": raw.decode("utf-8", errors="replace")}
 
     def run(self):
-        while True:
+        while self._running:
             try:
                 self.log.info(f"MQTT Try Connection: {self.cfg.host}:{self.cfg.port}")
                 self._client.connect(self.cfg.host, self.cfg.port, keepalive=60)
                 self._client.loop_forever()
             except (ConnectionRefusedError, OSError) as e:
+                if not self._running: break #stop()호출 후 바생한 에러는 무시
                 self.log.warning(f"Connection failed: {e}. Retrying in 5 seconds.")
                 time.sleep(5)
