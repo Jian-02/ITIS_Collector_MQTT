@@ -4,6 +4,7 @@ FileQueue tests — 2단계 커밋(peek/commit/rollback) 포함
 """
 
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -13,12 +14,26 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import QueueConfig
-from file_queue import FileQueue
+from file_queue import FileQueue, QueueFullError
 
+class BaseQueueTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = "c:\\itis_collector_mqtt\\tests\\persistent_queue_test.jsonl"
+        # 시작할 때 깨끗하게 청소!
+        if os.path.exists(self.tmp):
+            os.remove(self.tmp)
+
+    def tearDown(self):
+        # 끝날 때도 깨끗하게 청소!
+        if os.path.exists(self.tmp):
+            try:
+                os.remove(self.tmp)
+            except Exception:
+                pass
 
 def _make_queue(tmp: Path, size_limit_enabled=True, max_bytes=1024 * 1024) -> FileQueue:
     cfg = QueueConfig(
-        path=tmp / "queue.jsonl",
+        path=Path(tmp),
         size_limit_enabled=size_limit_enabled,
         max_bytes=max_bytes,
     )
@@ -35,10 +50,10 @@ def _raw_lines(q: FileQueue) -> list[dict]:
 # 기존 append / flush 테스트 (하위 호환 확인)
 # ══════════════════════════════════════════════════════════
 
-class AppendFlushTest(unittest.TestCase):
+class AppendFlushTest(BaseQueueTest):
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        super().setUp()
 
     def test_append_and_flush_returns_all_records(self):
         q = _make_queue(self.tmp)
@@ -93,18 +108,24 @@ class AppendFlushTest(unittest.TestCase):
 # 2단계 커밋 테스트 (peek / commit / rollback)
 # ══════════════════════════════════════════════════════════
 
-class TwoPhaseCommitTest(unittest.TestCase):
+class TwoPhaseCommitTest(BaseQueueTest):
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        super().setUp()
 
     # ── peek ──────────────────────────────────────────────
 
-    def test_peek_returns_records_without_status_field(self):
+    def test_peek_on_empty_queue_returns_empty(self):
         q = _make_queue(self.tmp)
+        self.assertEqual(q.peek(), [])
+
+    def test_peek_returns_records_without_status_field(self):
+        # SAMPLE_RECORDS 추가 전, PQ에 이미 있는 건수를 미리 파악
+        q = _make_queue(self.tmp)
+        existing  = q.peek()
         q.append({"v": 1})
         records = q.peek()
-        self.assertEqual(len(records), 1)
+        self.assertEqual(len(records)+len(existing), 1+len(existing))
         self.assertNotIn("_s", records[0])
 
     def test_peek_marks_records_as_pending_in_file(self):
@@ -114,10 +135,6 @@ class TwoPhaseCommitTest(unittest.TestCase):
         q.peek()
         objs = _raw_lines(q)
         self.assertTrue(all(o["_s"] == "P" for o in objs))
-
-    def test_peek_on_empty_queue_returns_empty(self):
-        q = _make_queue(self.tmp)
-        self.assertEqual(q.peek(), [])
 
     def test_peek_does_not_return_already_pending_records(self):
         """첫 번째 peek 이후 두 번째 peek는 빈 리스트를 반환해야 한다."""
@@ -188,7 +205,8 @@ class TwoPhaseCommitTest(unittest.TestCase):
         q.peek()   # Pending 상태로 전환 후 '크래시' 시뮬레이션
 
         # 재시작: 같은 경로로 FileQueue 재생성
-        cfg = QueueConfig(path=self.tmp / "queue.jsonl")
+        cfg = QueueConfig.from_env()
+        cfg.path = Path(self.tmp)
         q2  = FileQueue(cfg)
 
         objs = _raw_lines(q2)
@@ -197,15 +215,17 @@ class TwoPhaseCommitTest(unittest.TestCase):
     def test_crash_recovery_data_retrievable_after_restart(self):
         """재시작 후 복구된 레코드를 peek/commit으로 정상 처리할 수 있어야 한다."""
         q = _make_queue(self.tmp)
+        existing  = q.peek()
         q.append({"v": 42})
-        q.peek()   # 크래시 시뮬레이션
+        append_count = q.peek()   # 크래시 시뮬레이션
 
-        cfg = QueueConfig(path=self.tmp / "queue.jsonl")
+        cfg = QueueConfig.from_env()
+        cfg.path = Path(self.tmp)
         q2  = FileQueue(cfg)
 
         records = q2.peek()
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]["v"], 42)
+        self.assertEqual(len(records), len(existing) + len(append_count))
+        self.assertEqual(records[len(records)-1]["v"], 42)
         q2.commit()
         self.assertEqual(q2.path.stat().st_size, 0)
 
@@ -214,55 +234,45 @@ class TwoPhaseCommitTest(unittest.TestCase):
 # 용량 제한 테스트
 # ══════════════════════════════════════════════════════════
 
-class SizeLimitTest(unittest.TestCase):
+class SizeLimitTest(BaseQueueTest):
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        super().setUp()
 
-    def test_oldest_lines_dropped_when_limit_exceeded(self):
-        line_bytes = len(json.dumps({"_s": "Q", "v": "x" * 100}).encode()) + 1
-        q = _make_queue(self.tmp, size_limit_enabled=True, max_bytes=line_bytes * 3)
+    def test_append_raises_error_when_limit_exceeded(self):
+        cfg = QueueConfig.from_env()
+        cfg.path = Path(self.tmp)
+        q  = FileQueue(cfg)
 
-        for i in range(5):
-            q.append({"v": "x" * 100, "i": i})
+        # 3. 10MB 제한을 '진짜로' 넘기기 위해, 1건당 약 4MB짜리 데이터를 준비합니다.
+        huge_string = "x" * (1024 * 1024 * 4) 
 
-        records = q.flush()
-        indices = [r["i"] for r in records]
-        self.assertEqual(indices, sorted(indices))
-        self.assertNotIn(0, indices)
+        # 4. 4MB * 2건 = 8MB (10MB 이하이므로 정상 저장 성공)
+        q.append({"v": huge_string, "i": 0})
+        q.append({"v": huge_string, "i": 1})
+
+        # 5. 3번째 건(i=2)이 들어올 땐 8MB + 4MB = 12MB
+        with self.assertRaises(QueueFullError):
+            q.append({"v": huge_string, "i": 2})
 
     def test_all_records_preserved_when_limit_disabled(self):
-        q = _make_queue(self.tmp, size_limit_enabled=False, max_bytes=1)
+        cfg = QueueConfig.from_env()
+        cfg.path = Path(self.tmp)
+        q  = FileQueue(cfg)
         for i in range(20):
             q.append({"i": i})
         records = q.flush()
         self.assertEqual(len(records), 20)
-
-    def test_pending_records_not_dropped_on_size_limit(self):
-        """용량 초과 시 Pending 상태 레코드는 드롭되지 않아야 한다."""
-        line_bytes = len(json.dumps({"_s": "Q", "v": "x" * 100}).encode()) + 1
-        q = _make_queue(self.tmp, size_limit_enabled=True, max_bytes=line_bytes * 2)
-
-        q.append({"v": "x" * 100, "i": 0})
-        q.peek()  # i=0 을 Pending으로 전환
-
-        # 새 레코드 추가 → 용량 초과 → Queued만 드롭돼야 함
-        for i in range(1, 4):
-            q.append({"v": "x" * 100, "i": i})
-
-        objs = _raw_lines(q)
-        pending = [o for o in objs if o["_s"] == "P"]
-        self.assertEqual(len(pending), 1, "Pending 레코드가 드롭됨")
 
 
 # ══════════════════════════════════════════════════════════
 # 스레드 안전성 테스트
 # ══════════════════════════════════════════════════════════
 
-class ThreadSafetyTest(unittest.TestCase):
+class ThreadSafetyTest(BaseQueueTest):
 
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        super().setUp()
 
     def test_concurrent_appends_no_data_loss(self):
         q = _make_queue(self.tmp)

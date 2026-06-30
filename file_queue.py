@@ -25,6 +25,7 @@ JSONL-backed persistent queue with two-phase commit.
 
 import json
 import logging
+import os
 import threading
 from pathlib import Path
 
@@ -44,6 +45,9 @@ def _strip(record: dict) -> dict:
     """상태 필드(_s)를 제거한 순수 데이터 dict 반환."""
     return {k: v for k, v in record.items() if k != _STATUS_KEY}
 
+class QueueFullError(Exception):
+    """큐 파일 용량이 가득 찼을 때 발생하는 에러"""
+    pass
 
 class FileQueue:
     """
@@ -85,16 +89,21 @@ class FileQueue:
     # ── 쓰기 ──────────────────────────────────────────────
 
     def append(self, record: dict):
-        """레코드를 Queued 상태로 파일 끝에 추가."""
+        """레코드를 Queued 상태로 파일 끝에 추가. 용량 초과 시 에러 발생."""
         line = json.dumps(_mark(record, _STATUS_QUEUED), ensure_ascii=False) + "\n"
+        line_bytes = len(line.encode("utf-8"))
 
         with self._lock:
             if self.size_limit_enabled:
-                if self.path.stat().st_size + len(line.encode()) > self.max_bytes:
-                    self._drop_oldest(len(line.encode()))
+                # os.path.getsize나 stat은 이제 실시간으로 반영됩니다.
+                if self.path.exists() and (self.path.stat().st_size + line_bytes > self.max_bytes):
+                    raise QueueFullError("큐 파일 용량이 초과되었습니다.")
 
+            # 파일에 쓰고 '즉시' 디스크에 반영하도록 flush와 fsync 수행
             with open(self.path, "a", encoding="utf-8") as f:
                 f.write(line)
+                f.flush()
+                os.fsync(f.fileno())  # 💡 버퍼에 머물지 못하게 디스크로 강제 밀어넣기
 
     # ── 2단계 커밋 ────────────────────────────────────────
 
