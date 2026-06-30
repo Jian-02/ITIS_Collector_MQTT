@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -244,16 +245,13 @@ class SizeLimitTest(BaseQueueTest):
         cfg.path = Path(self.tmp)
         q  = FileQueue(cfg)
 
-        # 3. 10MB 제한을 '진짜로' 넘기기 위해, 1건당 약 4MB짜리 데이터를 준비합니다.
-        huge_string = "x" * (1024 * 1024 * 4) 
+        chunk = "x" * (q.max_bytes // 3)
 
-        # 4. 4MB * 2건 = 8MB (10MB 이하이므로 정상 저장 성공)
-        q.append({"v": huge_string, "i": 0})
-        q.append({"v": huge_string, "i": 1})
+        q.append({"v": chunk, "i": 0})
+        q.append({"v": chunk, "i": 1})
 
-        # 5. 3번째 건(i=2)이 들어올 땐 8MB + 4MB = 12MB
         with self.assertRaises(QueueFullError):
-            q.append({"v": huge_string, "i": 2})
+            q.append({"v": chunk, "i": 2})
 
     def test_all_records_preserved_when_limit_disabled(self):
         cfg = QueueConfig.from_env()
@@ -269,31 +267,174 @@ class SizeLimitTest(BaseQueueTest):
 # 스레드 안전성 테스트
 # ══════════════════════════════════════════════════════════
 
+def _run_concurrent_workers(self, n_threads, worker_func, *args):
+        """지정한 개수의 스레드를 생성하고 동시에 출발시킨 후, 조인합니다."""
+        barrier = threading.Barrier(n_threads)
+        errors = []
+        err_lock = threading.Lock()
+
+        def target_wrapper(tid):
+            try:
+                # 모든 스레드가 준비될 때까지 대기 후 동시 출발
+                barrier.wait()
+                worker_func(tid, errors, err_lock, *args)
+            except Exception as e:
+                with err_lock:
+                    errors.append(e)
+
+        threads = [threading.Thread(target=target_wrapper, args=(i,)) for i in range(n_threads)]
+        for t in threads: t.start()
+        for t in threads: t.join()
+
+        self.assertEqual(errors, [], f"동시성 작업 중 예외 발생: {errors[:3]}")
+
 class ThreadSafetyTest(BaseQueueTest):
 
     def setUp(self):
         super().setUp()
+        
 
-    def test_concurrent_appends_no_data_loss(self):
-        q = _make_queue(self.tmp)
-        total  = 200
+    def test_concurrent_appends_exact_match(self):
+        """스레드 2~4개, 소량 데이터로 내용물 무결성 완벽 검증."""
+        cfg = QueueConfig.from_env()
+        cfg.path = Path(self.tmp)
+        q = FileQueue(cfg)
+
+        n_threads = 4
+        per_thread = 10
         errors = []
+        err_lock = threading.Lock()  # 에러 리스트 보호용 락
+        expected = set()
 
-        def test_writer():
-            for i in range(total // 2):
+        for tid in range(n_threads):
+            for idx in range(per_thread):
+                expected.add((tid, idx))
+
+        # 모든 스레드가 준비되면 동시에 출발하도록 장벽(Barrier) 설정
+        barrier = threading.Barrier(n_threads)
+
+        def writer(tid):
+            barrier.wait()  # 동시 출발 타이밍 정렬
+            for idx in range(per_thread):
                 try:
-                    q.append({"i": i})
+                    q.append({"tid": tid, "idx": idx})
                 except Exception as e:
-                    errors.append(e)
+                    with err_lock:
+                        errors.append(e)
 
-        t1 = threading.Thread(target=test_writer)
-        t2 = threading.Thread(target=test_writer)
-        t1.start(); t2.start()
-        t1.join();  t2.join()
+        threads = [threading.Thread(target=writer, args=(tid,)) for tid in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(errors, [], f"append 중 예외 발생: {errors}")
 
         records = q.flush()
-        self.assertEqual(len(errors), 0)
-        self.assertEqual(len(records), total)
+        actual = {(r["tid"], r["idx"]) for r in records}
+
+        self.assertEqual(
+            len(records), n_threads * per_thread,
+            f"레코드 수 불일치: 기대 {n_threads * per_thread}, 실제 {len(records)}"
+        )
+        self.assertEqual(actual, expected, f"누락 또는 변조된 레코드: {expected - actual}")
+
+    def test_high_concurrency_stress(self):
+        """스레드 20개, 대량 데이터로 시스템 지연·에러 발생 여부 검증."""
+        cfg = QueueConfig.from_env()
+        cfg.path = Path(self.tmp)
+        q = FileQueue(cfg)
+
+        n_threads = 20
+        per_thread = 500
+        errors = []
+        err_lock = threading.Lock()
+        barrier = threading.Barrier(n_threads)
+
+        def writer(tid):
+            barrier.wait()
+            for idx in range(per_thread):
+                try:
+                    q.append({"tid": tid, "idx": idx})
+                    # GIL을 순간적으로 해제하고 스레드 스위칭을 유도하여 
+                    # 동시성 경합을 극대화하기 위한 미세한 힌트
+                    if idx % 10 == 0:
+                        time.sleep(0.00001) 
+                except Exception as e:
+                    with err_lock:
+                        errors.append(e)
+
+        threads = [threading.Thread(target=writer, args=(tid,)) for tid in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(errors, [], f"고부하 append 중 예외 발생 ({len(errors)}건): {errors[:3]}")
+
+        records = q.flush()
+        self.assertEqual(
+            len(records), n_threads * per_thread,
+            f"고부하 레코드 수 불일치: 기대 {n_threads * per_thread}, 실제 {len(records)}"
+        )
+
+    def test_concurrent_append_and_flush(self):
+        """append 스레드와 flush 스레드를 동시에 돌려 상호 작용 검증."""
+        cfg = QueueConfig.from_env()
+        cfg.path = Path(self.tmp)
+        q = FileQueue(cfg)
+
+        n_writers = 3
+        per_writer = 50
+        errors = []
+        err_lock = threading.Lock()
+        
+        collected = []
+        coll_lock = threading.Lock()  # 수집 리스트 보호용 락
+        stop_flag = threading.Event()
+
+        def writer(tid):
+            for idx in range(per_writer):
+                try:
+                    q.append({"tid": tid, "idx": idx})
+                    time.sleep(0.001)  # flusher가 끼어들 틈을 주기 위해 의도적 지연
+                except Exception as e:
+                    with err_lock:
+                        errors.append(("append", e))
+
+        def flusher():
+            while not stop_flag.is_set():
+                try:
+                    batch = q.flush()
+                    if batch:
+                        with coll_lock:
+                            collected.extend(batch)
+                except Exception as e:
+                    with err_lock:
+                        errors.append(("flush", e))
+                time.sleep(0.005)
+
+        writer_threads = [threading.Thread(target=writer, args=(tid,)) for tid in range(n_writers)]
+        flush_thread = threading.Thread(target=flusher)
+
+        flush_thread.start()
+        for t in writer_threads:
+            t.start()
+        for t in writer_threads:
+            t.join()
+
+        # 모든 writer 종료 후 flusher 안전하게 정리
+        stop_flag.set()
+        flush_thread.join()
+
+        # 마지막 잔여 데이터 수집 (락 불필요 - 스레드들 다 종료됨)
+        collected.extend(q.flush())
+
+        self.assertEqual(errors, [], f"동시 append/flush 중 예외 발생: {errors}")
+        self.assertEqual(
+            len(collected), n_writers * per_writer,
+            f"동시 append/flush 레코드 수 불일치: 기대 {n_writers * per_writer}, 실제 {len(collected)}"
+        )
 
 
 if __name__ == "__main__":
