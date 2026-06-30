@@ -1,25 +1,38 @@
 # ITIS_Collector_MQTT
 
-ITIS_Collector_MQTT는 MQTT 프로토콜을 사용하여 원격 장치로부터 실시간 데이터를 수집하고, 이를 사전에 정의된 규칙에 따라 가공 및 처리하는 파이썬 기반 데이터 수집기입니다.
+ITIS_Collector_MQTT는 반도체 소성로 장비의 센서 데이터를 ITIS Capture를 통해 수집하고, MQTT 브로커를 거쳐 데이터베이스에 적재하는 견고한 데이터 파이프라인 시스템입니다. 파일 기반의 영속적 큐(Persistent Queue)를 사용하여 데이터의 무결성을 보장합니다.
 
-## 주요 기능
-* **MQTT 데이터 수집**: 특정 MQTT 브로커로부터 데이터를 실시간으로 구독(Subscribe)합니다.
-* **데이터 큐 관리**: 수집된 데이터를 안정적으로 처리하기 위해 파일 기반 큐(`file_queue.py`)를 활용합니다.
-* **데이터 매핑**: `mapping.json` 설정을 통해 수집된 데이터 형식을 원하는 구조로 변환(`data_mapper.py`)합니다.
-* **설정 기반 운영**: `.env` 및 `config.py`를 통해 MQTT 연결 정보 및 시스템 환경을 간편하게 관리합니다.
+## 시스템 아키텍처 흐름  
+데이터는 다음의 파이프라인을 따라 흐릅니다:
+1. **데이터 수집**: MQTT 브로커를 통해 센서 데이터를 수집합니다(`mqtt_collector_py`).  
+2. **데이터 매핑**: `data_mapper.py`와 `mapping.json`을 통해 원본 데이터를 DB 레코드 형태로 변환합니다.  
+3. **영속적 큐(PQ)관리**: `file_queue.py`를 통해 데이터를 로컬 큐에 저장합니다. Commit/Rollback 메커니즘을 지원합니다.  
+4. **데이터 로드**: `loader.py`를 통해 DB에 데이터를 적재(INSERT/SELECT)합니다.  
+5. **로깅**: `logger.py`를 통해 시스템 상태를 실시간 기록합니다.  
 
 ## 프로젝트 구조
 ```text
-.
-├── main.py             # 프로그램 실행 진입점
-├── mqtt_collector.py   # MQTT 브로커 연결 및 메시지 구독 로직
-├── data_mapper.py      # 데이터 가공 및 매핑 로직
-├── file_queue.py       # 파일 기반 큐 처리
-├── mapping.json        # 데이터 변환 규칙 정의 파일
-├── config.py           # 시스템 설정 관리
-├── .env.example        # 환경 변수 예시 파일
-└── requirements.txt    # 의존성 패키지 목록
+ITIS_Collector_MQTT/
+├── main.py              # 메인 루프 및 파이프라인 제어
+├── mqtt_collector.py    # MQTT 데이터 수집
+├── data_mapper.py       # 데이터 변환 로직
+├── file_queue.py        # 영속적 큐 관리
+├── loader.py            # DB 적재 모듈
+├── logger.py            # 로그 시스템
+├── mapping.json         # 매핑 규칙 정의
+├── .env.example         # 환경 설정 템플릿
+├── requirements.txt     # 의존성 패키지 목록
+└── tests                # pytest 테스트를 위한 폴더
 ```
+
+## 환경 설정(.env)  
+모든 주요 설정은 `.env` 파일을 통해 관리됩니다. 주요 항목은 다음과 같습니다:  
+* **MQTT**: 서버 주소, 포트, 토픽 정보  
+* **PG(Persistent Queue)**: 큐 파일 경로, 최대 파일 사이즈, 제한 여부.  
+* **DB**: 데이터베이스 타입(MsSQL, Oracle, PostgreSQL 등)및 서버 접속 정보.  
+* **Loader**: 데이터 적재 시 재시도 횟수 및 배치 사이즈.  
+* **로그**: 로그 레벨, 파일 크기, 보관 개수 제한 및 저장 경로.  
+* **Mapper**: 페이로드 매핑 규칙.  
 
 ## 설치 및 시작하기
 ### 1. 환경 설정  
