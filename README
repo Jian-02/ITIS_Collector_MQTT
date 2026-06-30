@@ -1,0 +1,44 @@
+# ITIS_Collector_MQTT
+
+ITIS_Collector_MQTT는 MQTT 프로토콜을 사용하여 원격 장치로부터 실시간 데이터를 수집하고, 이를 사전에 정의된 규칙에 따라 가공 및 처리하는 파이썬 기반 데이터 수집기입니다.
+
+## 주요 기능
+* **MQTT 데이터 수집**: 특정 MQTT 브로커로부터 데이터를 실시간으로 구독(Subscribe)합니다.
+* **데이터 큐 관리**: 수집된 데이터를 안정적으로 처리하기 위해 파일 기반 큐(`file_queue.py`)를 활용합니다.
+* **데이터 매핑**: `mapping.json` 설정을 통해 수집된 데이터 형식을 원하는 구조로 변환(`data_mapper.py`)합니다.
+* **설정 기반 운영**: `.env` 및 `config.py`를 통해 MQTT 연결 정보 및 시스템 환경을 간편하게 관리합니다.
+
+## 프로젝트 구조
+```text
+.
+├── main.py             # 프로그램 실행 진입점
+├── mqtt_collector.py   # MQTT 브로커 연결 및 메시지 구독 로직
+├── data_mapper.py      # 데이터 가공 및 매핑 로직
+├── file_queue.py       # 파일 기반 큐 처리
+├── mapping.json        # 데이터 변환 규칙 정의 파일
+├── config.py           # 시스템 설정 관리
+├── .env.example        # 환경 변수 예시 파일
+└── requirements.txt    # 의존성 패키지 목록
+```
+
+## 설치 및 시작하기
+### 1. 환경 설정  
+프로젝트를 복제하고 필요한 라이브러리를 설치합니다.  
+``` text  
+git clone [https://github.com/Jian-02/ITIS_Collector_MQTT.git](https://github.com/Jian-02/ITIS_Collector_MQTT.git)
+cd ITIS_Collector_MQTT
+pip install -r requirements.txt
+```  
+### 2. 설정  
+`.env.example` 파일을 복사하여 `.env` 파일을 생성하고, 사용하는 MQTT 브로커 정보를 입력하세요.  
+```text  
+cp .env.example .env
+```  
+### 3. 실행  
+모든 설정이 완료되었다면 아래 명령어로 수집기를 시작합니다.  
+```text
+python main.py
+```  
+
+## 라이선스  
+본 프로젝트는 MIT License 를 따릅니다.  
