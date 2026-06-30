@@ -22,6 +22,7 @@ ITIS_Collector_MQTT/
 ├── mapping.json         # 매핑 규칙 정의
 ├── .env.example         # 환경 설정 템플릿
 ├── requirements.txt     # 의존성 패키지 목록
+├── mqtt_test_publisher.py # 테스트용 데이터 발행기
 └── tests                # pytest 테스트를 위한 폴더
 ```
 
@@ -52,6 +53,30 @@ cp .env.example .env
 ```text
 python main.py
 ```  
+
+## MQTT Publisher 테스트 (개발용)  
+`mqtt_test_publisher.py`를 사용하여 가상의 데이터를 발생시켜 시스템을 테스트할 수 있습니다.  
+```text
+# 기본 실행
+python mqtt_test_publisher.py
+
+# 옵션 설정 예시
+python mqtt_test_publisher.py --count 50 --interval 0.5
+python mqtt_test_publisher.py --host localhost --port 1883
+```  
+위 스크립트는 `.env`의 `MQTT_HOST / MQTT_PORT`를 사용하며, `factory/line1/temp` 등 지정된 토픽으로 `mapping.json` 형식에 맞는 랜덤 페이로드를 발행합니다.  
+
+## 운영 가이드 및 트러블 슈팅  
+### 1. MQTT Brocker 실행  
+테스트 환경에서는 Mosquitto 브로커를 다운받아, 아래 명령어를 통해 디버그 모드로 실행할 수 있습니다.
+```
+Mosquitto.exe -v
+```  
+`Publisher` -> `Mosquitto (1833 port)` -> `Collector` 순으로 데이터가 전송됩니다.  
+  
+### 2. 주요 이슈 및 대응  
+* **Brocker 연결 재시도**: Mosquitto가 종료된 경우, Collector는 설정된 폴링(Polling) 시간이 돌아올 때까지 재연결을 대기합니다.(폴링 시간 조절로 연결 공백 최소화 가능)  
+* **DB 연결 실패 시**: DB접속 장애가 발생하면 수신된 데이터를 PQ(Persistent Queue)파일에 임시 저장합니다. DB 연결이 복구되면 PQ에 쌓인 데이터를 한 번에 가져와(Pulling) 적재합니다.  
 
 ## 라이선스  
 본 프로젝트는 MIT License 를 따릅니다.  
