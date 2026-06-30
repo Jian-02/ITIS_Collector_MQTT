@@ -1,13 +1,11 @@
 """
 tests/db_test.py
-Integration tests for real database connections.
-Uses connection settings from .env.test and automatically skips when the connection fails.
+실제 데이터베이스 연결을 검증하는 통합 테스트입니다.
+.env.test의 연결 설정을 사용하며, 연결에 실패할 경우 자동으로 테스트를 건너뜁니다.
 """
 
 import json
 import sys
-import tempfile
-import time
 from pathlib import Path
 
 import pytest
@@ -26,11 +24,11 @@ from loader import DBLoader
 class DBConnectionTest:
 
     def test_connection_success(self, db_adapter):
-        """Database connection should succeed."""
+        """데이터베이스 연결에 성공해야 합니다."""
         assert db_adapter._conn is not None
 
     def test_ensure_table_creates_sensor_data(self, clean_test_table):
-        """sensor_data_test table should be created."""
+        """sensor_data_test 테이블이 정상적으로 생성되어야 합니다."""
         adapter    = clean_test_table
         db_type    = DBConfig.from_env().db_type
         table_name = DBConfig.from_env().table_name
@@ -83,21 +81,21 @@ def _count_rows(adapter, where: str = "") -> int:
 class DBInsertTest:
 
     def test_insert_single_row(self, clean_test_table):
-        """A single inserted record should be queryable."""
+        """단일 삽입된 레코드가 정상적으로 조회되어야 합니다."""
         adapter = clean_test_table
         before  = _count_rows(adapter)
         adapter.insert_batch([SAMPLE_ROWS[0]])
         assert _count_rows(adapter) == before + 1
 
     def test_insert_multiple_rows(self, clean_test_table):
-        """After inserting multiple records, the total count should match."""
+        """여러 레코드를 삽입한 후, 전체 개수가 일치해야 합니다."""
         adapter = clean_test_table
         before  = _count_rows(adapter)
         adapter.insert_batch(SAMPLE_ROWS)
         assert _count_rows(adapter) == before + len(SAMPLE_ROWS)
 
     def test_inserted_value_is_correct(self, clean_test_table):
-        """Inserted value should be correct."""
+        """삽입된 값이 올바르게 저장 및 조회되어야 합니다."""
         adapter = clean_test_table
         before  = _count_rows(adapter, " WHERE topic = 'factory/line1/temp' AND value = 23.5")
         adapter.insert_batch([SAMPLE_ROWS[0]])
@@ -105,17 +103,17 @@ class DBInsertTest:
         assert after == before + 1
 
     def test_insert_empty_batch_does_not_raise(self, clean_test_table):
-        """Inserting an empty batch should not raise an error."""
+        """빈 배치를 삽입해도 에러가 발생하지 않아야 합니다."""
         adapter = clean_test_table
         before  = _count_rows(adapter)
         try:
             adapter.insert_batch([])
         except Exception as e:
-            pytest.fail(f"빈 배치 INSERT 에러: {e}")
+            pytest.fail(f"Empty batch INSERT error: {e}")
         assert _count_rows(adapter) == before
 
     def test_insert_null_value_allowed(self, clean_test_table):
-        """Rows with value=None should be inserted."""
+        """value가 None인 행(Row)도 정상적으로 삽입되어야 합니다."""
         adapter  = clean_test_table
         before   = _count_rows(adapter, " WHERE value IS NULL")
         null_row = (
@@ -130,7 +128,7 @@ class DBInsertTest:
         assert _count_rows(adapter, " WHERE value IS NULL") == before + 1
 
     def test_insert_large_batch(self, clean_test_table):
-        """A large batch of 1,000 rows should be inserted successfully."""
+        """1,000행의 대규모 배치가 정상적으로 삽입되어야 합니다."""
         adapter = clean_test_table
         before  = _count_rows(adapter)
         rows    = [
@@ -149,13 +147,13 @@ class DBInsertTest:
 
 
 # ══════════════════════════════════════════════════════════
-# DB Failover & FileQueue Backup Tests
+# DB 장애 조치(Failover) 및 파일 큐(FileQueue) 백업 테스트
 # ══════════════════════════════════════════════════════════
 
 class DBFailoverTest:
 
     def test_queue_backup_on_db_failure(self, tmp_path):
-        """DB 연결 실패 시 데이터가 FileQueue에 안전하게 보존돼야 한다."""
+        """DB 연결이 실패했을 때, 데이터가 파일 큐(FileQueue)에 안전하게 보존되어야 합니다."""
         bad_db_cfg      = DBConfig.from_env()
         bad_db_cfg.host = "invalid_host_1234.com"
         bad_db_cfg.port = 9999
@@ -178,8 +176,8 @@ class DBFailoverTest:
 
 
 # ══════════════════════════════════════════════════════════
-# PQ → DB 적재 테스트
-# (파일에 기존 데이터가 있을 때 DB에 정상적으로 밀어넣어지는지)
+# PQ → DB 로드 테스트
+# (파일에 이미 존재하는 데이터가 DB로 올바르게 푸시되는지 검증)
 # ══════════════════════════════════════════════════════════
 
 SAMPLE_RECORDS = [
@@ -210,45 +208,45 @@ class PQToDBTest:
 
     def test_existing_pq_data_is_inserted_to_db(self, clean_test_table, tmp_path):
         """
-        프로그램 시작 전에 PQ 파일에 쌓인 데이터가
-        _process() 호출 시 DB에 정상 INSERT되어야 한다.
+        프로그램이 시작되기 전에 파일 큐(PQ) 파일에 이미 누적되어 있던 데이터가
+        _process()가 호출될 때 DB에 성공적으로 INSERT되어야 합니다.
         """
         adapter   = clean_test_table
         queue_cfg = QueueConfig.from_env()
         queue     = FileQueue(queue_cfg)
  
-        # SAMPLE_RECORDS 추가 전, PQ에 이미 있는 건수를 미리 파악
+        # Figure out the count already in the PQ before adding SAMPLE_RECORDS
         existing  = queue.peek()
         queue.rollback()
         expected  = len(existing) + len(SAMPLE_RECORDS)
  
         for record in SAMPLE_RECORDS:
             queue.append(record)
-        assert queue_cfg.path.stat().st_size > 0, "PQ 파일에 데이터가 없음"
+        assert queue_cfg.path.stat().st_size > 0, "No data in the PQ file"
 
         before = _count_rows(adapter)
 
-        # DBLoader로 처리
+        # DBLoader를 통해 처리
         db_cfg = DBConfig.from_env()
         db_cfg.table_name = adapter.table_name
         loader = DBLoader(db_cfg, LoaderConfig(batch_size=500, poll_interval=1), queue)
         loader._adapter = adapter   # 이미 연결된 어댑터 재사용
         loader._process()
 
-        # DB에 들어갔는지 확인
+        # DB에 정상적으로 반영되었는지 검증
         assert _count_rows(adapter) == before + expected, \
-            "PQ에 있던 레코드가 DB에 INSERT되지 않음"
+            "Records that were in the PQ were not INSERTed into the DB"
         assert queue_cfg.path.stat().st_size == 0, \
-            "INSERT 성공 후 PQ 파일이 비워지지 않음"
+            "PQ file was not emptied after a successful INSERT"
 
     def test_pq_file_preserved_on_db_failure(self, tmp_path):
         """
-        DB INSERT 실패 시 PQ 파일의 데이터가 Queued 상태로 복원돼야 한다.
+        # DB INSERT가 실패했을 때, 파일 큐(PQ) 파일의 데이터가 다시 대기(Queued) 상태로 복구되어야 합니다.
         """
         queue_cfg = QueueConfig.from_env()
         queue     = FileQueue(queue_cfg)
  
-        # 테스트 전 PQ에 이미 있는 건수 파악
+        # 테스트 시작 전 파일 큐(PQ)에 이미 존재하는 데이터 개수 확인
         existing = queue.peek()
         queue.rollback()
         expected = len(existing) + len(SAMPLE_RECORDS)
@@ -268,31 +266,31 @@ class PQToDBTest:
         except Exception:
             pass
 
-        # 파일이 남아있고, Queued 상태로 복원됐는지 확인
-        assert queue_cfg.path.stat().st_size > 0, "실패 후 PQ 파일이 비워짐 (데이터 유실)"
+        # 파일이 그대로 남아 있고 대기(Queued) 상태로 복구되었는지 검증
+        assert queue_cfg.path.stat().st_size > 0, "PQ file was emptied after a failure (data loss)"
 
         lines = queue_cfg.path.read_text(encoding="utf-8").splitlines()
         objs  = [json.loads(l) for l in lines if l.strip()]
         assert all(o["_s"] == "Q" for o in objs), \
-            "실패 후 Pending(_s=P) 줄이 남아있음 (rollback 미동작)"
+            "Pending(_s=P) line(s) remain after a failure (rollback did not run)"
         assert len(objs) == len(SAMPLE_RECORDS), \
-            f"복원된 레코드 수 불일치: {len(objs)} != {len(SAMPLE_RECORDS)}"
+            f"Restored record count mismatch: {len(objs)} != {len(SAMPLE_RECORDS)}"
 
     def test_pq_data_inserted_after_reconnect(self, clean_test_table, tmp_path):
         """
-        DB 재연결 후 PQ에 남아있던 데이터가 정상 INSERT돼야 한다.
-        (rollback → 재연결 → 재처리 시나리오)
+        DB 재연결 후, 파일 큐(PQ)에 남아 있는 데이터가 성공적으로 INSERT되어야 합니다.
+        (rollback → reconnect → reprocess scenario)
         """
         adapter   = clean_test_table
         queue_cfg = QueueConfig.from_env()
         queue     = FileQueue(queue_cfg)
  
-        # 테스트 전 PQ에 이미 있는 건수 파악
+        # 테스트 시작 전 파일 큐(PQ)에 이미 존재하는 데이터 개수 확인
         existing = queue.peek()
         queue.rollback()
         expected = len(existing) + len(SAMPLE_RECORDS)
 
-        # 1차: DB 연결 실패 → rollback
+        # 1차 시도: DB 연결 실패 → 롤백
         bad_db_cfg      = DBConfig.from_env()
         bad_db_cfg.host = "invalid_host_1234.com"
         bad_db_cfg.port = 9999
@@ -306,7 +304,7 @@ class PQToDBTest:
         
         before = _count_rows(adapter)
 
-        # 2차: 정상 DB로 재처리
+        # 2차 시도: 정상 작동하는 DB로 재처리
         db_cfg        = DBConfig.from_env()
         db_cfg.table_name = adapter.table_name
         good_loader   = DBLoader(db_cfg, LoaderConfig(batch_size=500, poll_interval=1), queue)
@@ -314,13 +312,13 @@ class PQToDBTest:
         good_loader._process()
 
         assert _count_rows(adapter) == before + len(SAMPLE_RECORDS), \
-            "재연결 후 PQ 데이터가 DB에 INSERT되지 않음"
+            "PQ data was not INSERTed into the DB after reconnecting"
         assert queue_cfg.path.stat().st_size == 0, \
-            "재연결 후 INSERT 성공했지만 PQ 파일이 비워지지 않음"
+            "INSERT succeeded after reconnecting but the PQ file was not emptied"
 
 
 # ══════════════════════════════════════════════════════════
-# Inject fixtures into pytest classes
+# pytest 클래스에 픽스처(fixture) 주입
 # ══════════════════════════════════════════════════════════
 
 class TestDBConnection(DBConnectionTest):

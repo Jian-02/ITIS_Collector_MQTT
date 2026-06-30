@@ -1,14 +1,12 @@
 """
 logger.py
-Filename: collector_YYYYMMDD_HHMMSS.log
-- Creates a new time-based file when the current file exceeds max_bytes.
-- Deletes the oldest files first when the file count exceeds max_files.
+파일명: collector_YYYYMMDD_HHMMSS.log
+- 현재 파일이 max_bytes를 초과하면 시간 기반의 새 파일을 생성합니다.
+- 파일 수가 max_files를 초과하면 가장 오래된 파일부터 순차적으로 삭제합니다.
 """
 
 import glob
 import logging
-import logging.handlers
-import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -20,13 +18,13 @@ FILE_PATTERN = re.compile(r"collector_(\d{8}_\d{6})\.log$")
 
 
 def _current_filename(log_dir: Path) -> Path:
-    """Returns the log file path based on the current time."""
+    """현재 시간을 기반으로 로그 파일 경로를 반환합니다."""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return log_dir / f"{FILE_PREFIX}{ts}.log"
 
 
 def _sorted_log_files(log_dir: Path) -> list[Path]:
-    """Returns log files in the log directory sorted from oldest to newest."""
+    """로그 디렉터리 내의 로그 파일들을 가장 오래된 순부터 가장 최신 순으로 정렬하여 반환합니다."""
     files = [
         Path(p)
         for p in glob.glob(str(log_dir / f"{FILE_PREFIX}*.log"))
@@ -36,21 +34,21 @@ def _sorted_log_files(log_dir: Path) -> list[Path]:
 
 
 def _purge_old_files(log_dir: Path, max_files: int):
-    """Deletes the oldest files first when max_files is exceeded."""
+    """max_files를 초과할 경우, 가장 오래된 파일부터 순차적으로 삭제합니다."""
     files = _sorted_log_files(log_dir)
     while len(files) > max_files:
         oldest = files.pop(0)
         try:
             oldest.unlink()
-            logging.getLogger("logger").info(f"오래된 로그 파일 삭제: {oldest.name}")
+            logging.getLogger("logger").info(f"Deleted old log file: {oldest.name}")
         except OSError as e:
-            logging.getLogger("logger").warning(f"로그 파일 삭제 실패: {oldest.name} — {e}")
+            logging.getLogger("logger").warning(f"Failed to delete log file: {oldest.name} — {e}")
 
 
 class SizeAndTimeRotatingHandler(logging.FileHandler):
     """
-    Rotates to a new file when the current file exceeds max_bytes.
-    The filename is based on the rotation time, and old files are deleted according to max_files.
+    현재 파일이 max_bytes를 초과하면 새로운 파일로 로테이트(교체)합니다.
+    파일명은 로테이트 시점의 시간을 기준으로 생성되며, 기존 파일들은 max_files에 따라 오래된 순으로 삭제됩니다.
     """
 
     def __init__(self, cfg: LogConfig):
@@ -73,7 +71,7 @@ class SizeAndTimeRotatingHandler(logging.FileHandler):
         super().emit(record)
 
     def _rotate(self):
-        """Closes the current file, opens a new one, and purges old files."""
+        """현재 파일을 닫고 새 파일을 열며, 오래된 파일들을 정리(삭제)합니다."""
         self.stream.flush()
         self.stream.close()
 
@@ -86,8 +84,8 @@ class SizeAndTimeRotatingHandler(logging.FileHandler):
 
 def setup_logger(cfg: LogConfig) -> None:
     """
-    Configures console and file handlers on the root logger.
-    Call this once from main.py.
+    루트 로거(root logger)에 콘솔 및 파일 핸들러를 설정합니다.
+    main.py에서 한 번만 호출하면 됩니다.
     """
     fmt = logging.Formatter(
         "%(asctime)s [%(name)s] %(levelname)s %(message)s",

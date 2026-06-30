@@ -1,6 +1,6 @@
 """
 config.py
-Loads .env values and provides application configuration.
+.env 값을 로드하고 application configuration을 제공합니다.
 """
 
 import logging
@@ -48,7 +48,7 @@ class MQTTConfig:
         )
 
 
-# --- File PQ ------------------------------------------------
+# --- File PQ (Persistent Queue) ------------------------------------------------
 
 @dataclass
 class QueueConfig:
@@ -85,7 +85,7 @@ class DBConfig:
     def from_env(cls) -> "DBConfig":
         db_type = _get("DB_TYPE", "postgresql").lower()
         if db_type not in SUPPORTED_DB_TYPES:
-            raise ValueError(f"지원하지 않는 DB_TYPE: {db_type} (지원: {SUPPORTED_DB_TYPES})")
+            raise ValueError(f"Unsupported DB_TYPE: {db_type} (supported: {SUPPORTED_DB_TYPES})")
 
         default_port = {"postgresql": "5432", "mssql": "1433", "oracle": "1521"}
 
@@ -140,8 +140,8 @@ class MapperConfig:
 @dataclass
 class LogConfig:
     log_dir:       Path = Path("./logs")
-    max_bytes:     int  = 100 * 1024 * 1024  # Maximum size per file
-    max_files:     int  = 30                  # Maximum number of retained files
+    max_bytes:     int  = 100 * 1024 * 1024  # 파일당 Maximum size
+    max_files:     int  = 30                  # 보관되는 파일의 Maximum 개수
     level:         int  = logging.INFO
 
     @classmethod

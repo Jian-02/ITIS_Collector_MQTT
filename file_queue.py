@@ -1,25 +1,25 @@
 """
 file_queue.py
-JSONL-backed persistent queue with two-phase commit.
-
+two-phase commit 방식의 JSONL 기반 persistent queue입니다.
+ 
 ──────────────────────────────────────────────────
- 파일 구조 (queue.jsonl)
+ File structure (queue.jsonl)
 ──────────────────────────────────────────────────
- 각 줄은 아래 두 형태 중 하나:
-
-   {"_s":"Q", ...데이터...}   ← 대기(Queued)
-   {"_s":"P", ...데이터...}   ← 처리 중(Pending) : DB INSERT 시도 중
-
- 정상 흐름:
-   append()  → _s = "Q"
-   peek()    → _s = "Q" 줄만 읽고 반환, 파일에서 _s를 "P"로 변경
-   commit()  → _s = "P" 줄 제거
-   rollback()→ _s = "P" 줄을 "Q"로 복원
-
- 크래시 복구 (재시작 시 __init__ 내부):
-   _s = "P" 줄이 남아 있으면 자동으로 "Q"로 되돌림
-   → 다음 peek() 때 재처리
-
+ 각 line은 다음 두 가지 형태 중 하나입니다:
+ 
+    {"_s":"Q", ...data...}   ← 대기 중 (Queued)
+    {"_s":"P", ...data...}   ← 처리 중 (Pending): DB INSERT 시도 중
+ 
+ Normal flow:
+    append()  → _s = "Q"
+    peek()    → "Q" line만 읽어서 리턴하고, 파일 내에서 _s를 "P"로 변경
+    commit()  → "P" line들을 제거
+    rollback() → "P" line들을 다시 "Q"로 복구
+ 
+ Crash recovery (재시작 시 __init__ 내부에서 수행):
+    "P" line이 남아있으면 자동으로 "Q"로 revert됨
+    → 다음 peek() 시점에 reprocessed됨
+ 
 ──────────────────────────────────────────────────
 """
 
@@ -27,7 +27,6 @@ import json
 import logging
 import os
 import threading
-from pathlib import Path
 
 from config import QueueConfig
 
@@ -37,32 +36,32 @@ _STATUS_KEY     = "_s"
 
 
 def _mark(record: dict, status: str) -> dict:
-    """레코드에 상태 필드를 추가한 새 dict 반환 (원본 불변)."""
+    """record에 status field가 추가된 새로운 dict를 리턴합니다 (original은 변경되지 않음)."""
     return {_STATUS_KEY: status, **{k: v for k, v in record.items() if k != _STATUS_KEY}}
 
 
 def _strip(record: dict) -> dict:
-    """상태 필드(_s)를 제거한 순수 데이터 dict 반환."""
+    """status field(_s)가 제거된 pure data dict를 리턴합니다."""
     return {k: v for k, v in record.items() if k != _STATUS_KEY}
 
 class QueueFullError(Exception):
-    """큐 파일 용량이 가득 찼을 때 발생하는 에러"""
+    """queue file capacity가 가득 찼을 때 발생하는 Error입니다."""
     pass
 
 class FileQueue:
     """
-    JSONL-backed persistent queue with two-phase commit.
+    JSONL 기반의 two-phase commit을 지원하는 persistent queue입니다.
 
     Public API
     ----------
-    append(record)   : 레코드를 큐에 추가  (Queued 상태)
-    peek()           : 대기 중 레코드를 모두 읽고 Pending으로 전환
-    commit()         : Pending 레코드를 파일에서 제거  (DB INSERT 성공 후 호출)
-    rollback()       : Pending 레코드를 Queued로 복원  (DB INSERT 실패 후 호출)
+    append(record)   : queue에 record를 추가합니다 (Queued state)
+    peek()           : 모든 대기 중인 record를 읽고 Pending 상태로 transition합니다
+    commit()         : 파일에서 Pending record를 제거합니다 (DB INSERT 성공 후 호출)
+    rollback()       : Pending record를 다시 Queued 상태로 복구합니다 (DB INSERT 실패 시 호출)
 
-    하위 호환 API
-    -------------
-    flush()          : peek() + commit() 를 한 번에 수행 (기존 코드와 호환)
+    Backward-compatible API
+    ------------------------
+    flush()          : 한 번의 호출로 peek() + commit()을 함께 수행합니다 (기존 code와의 호환성용)
     """
 
     def __init__(self, cfg: QueueConfig):
@@ -76,42 +75,42 @@ class FileQueue:
         if not self.path.exists():
             self.path.touch()
 
-        # 크래시 복구: 재시작 시 Pending 줄을 Queued로 되돌림
+        # Crash recovery: 재시작 시 Pending line들을 Queued로 revert합니다.
         recovered = self._recover_pending()
         if recovered:
-            self.log.warning(f"크래시 복구: {recovered}건의 Pending 레코드를 Queued로 복원")
+            self.log.warning(f"Crash recovery: restored {recovered} Pending record(s) to Queued")
 
         if self.size_limit_enabled:
-            self.log.info(f"PQ 용량 제한: {self.max_bytes // (1024 * 1024)} MB")
+            self.log.info(f"PQ size limit: {self.max_bytes // (1024 * 1024)} MB")
         else:
-            self.log.info("PQ 용량 제한: 비활성화")
+            self.log.info("PQ size limit: disabled")
 
-    # ── 쓰기 ──────────────────────────────────────────────
+    # ── Write ──────────────────────────────────────────────
 
     def append(self, record: dict):
-        """레코드를 Queued 상태로 파일 끝에 추가. 용량 초과 시 에러 발생."""
+        """Queued state로 file의 끝에 record를 append합니다. Capacity를 초과하면 error를 발생시킵니다."""
         line = json.dumps(_mark(record, _STATUS_QUEUED), ensure_ascii=False) + "\n"
         line_bytes = len(line.encode("utf-8"))
 
         with self._lock:
             if self.size_limit_enabled:
-                # os.path.getsize나 stat은 이제 실시간으로 반영됩니다.
+                 # os.path.getsize/stat이 이제 실시간으로 file 상태를 반영합니다.
                 if self.path.exists() and (self.path.stat().st_size + line_bytes > self.max_bytes):
-                    raise QueueFullError("큐 파일 용량이 초과되었습니다.")
+                    raise QueueFullError("Queue storage capacity exceeded.")
 
-            # 파일에 쓰고 '즉시' 디스크에 반영하도록 flush와 fsync 수행
+            # file에 쓰고 '즉각적인' flush + disk로의 fsync를 강제합니다.
             with open(self.path, "a", encoding="utf-8") as f:
                 f.write(line)
                 f.flush()
-                os.fsync(f.fileno())  # 💡 버퍼에 머물지 못하게 디스크로 강제 밀어넣기
+                os.fsync(f.fileno())  # Force the write to disk instead of staying in the buffer
 
-    # ── 2단계 커밋 ────────────────────────────────────────
+    # ── Commit ──────────────────────────────────────────────
 
     def peek(self) -> list[dict]:
         """
-        Queued 레코드를 읽고 파일 내 상태를 Pending으로 전환.
-        반환값은 _s 필드가 제거된 순수 데이터 리스트.
-        DB INSERT 전에 호출.
+        Queued 레코드를 읽어와 파일 내 상태를 Pending으로 변경합니다.
+        반환값은 _s 필드가 제거된 순수 데이터 딕셔너리 리스트입니다.
+        DB INSERT 이전에 호출합니다.
         """
         with self._lock:
             lines = self._read_lines()
@@ -128,7 +127,7 @@ class FileQueue:
                 try:
                     obj = json.loads(stripped)
                 except json.JSONDecodeError:
-                    self.log.warning(f"파싱 실패 라인 스킵: {stripped[:80]}")
+                    self.log.warning(f"Skipping line that failed to parse: {stripped[:80]}")
                     continue
 
                 if obj.get(_STATUS_KEY) == _STATUS_QUEUED:
@@ -137,7 +136,7 @@ class FileQueue:
                         json.dumps(_mark(obj, _STATUS_PENDING), ensure_ascii=False) + "\n"
                     )
                 else:
-                    # Pending이거나 상태 필드 없는 레거시 줄은 그대로 유지
+                    # Pending 라인이나 status 필드가 없는 레거시 라인은 그대로 유지합니다.
                     new_lines.append(line)
 
             self._write_lines(new_lines)
@@ -145,8 +144,8 @@ class FileQueue:
 
     def commit(self):
         """
-        Pending 레코드를 파일에서 제거.
-        DB INSERT 성공 후 호출.
+        파일에서 Pending 레코드를 제거합니다.
+        DB INSERT 성공 이후에 호출합니다.
         """
         with self._lock:
             lines = self._read_lines()
@@ -157,12 +156,12 @@ class FileQueue:
             self._write_lines(kept)
             removed = len(lines) - len(kept)
             if removed:
-                self.log.debug(f"commit: {removed}줄 제거")
+                self.log.debug(f"commit: removed {removed} line(s)")
 
     def rollback(self):
         """
-        Pending 레코드를 Queued로 복원.
-        DB INSERT 실패 후 호출.
+        Pending 레코드를 다시 Queued 상태로 복구합니다.
+        DB INSERT 실패 이후에 호출합니다.
         """
         with self._lock:
             lines     = self._read_lines()
@@ -189,22 +188,22 @@ class FileQueue:
 
             self._write_lines(new_lines)
             if restored:
-                self.log.info(f"rollback: {restored}건 Queued로 복원")
+                self.log.info(f"rollback: restored {restored} record(s) to Queued")
 
-    # ── 하위 호환 API ────────────────────────────────────
+     # ── Backward-compatible API ────────────────────────────────────
 
     def flush(self) -> list[dict]:
         """
-        peek() + commit() 를 원자적으로 수행.
-        기존 코드와의 하위 호환을 위해 유지.
-        INSERT 실패 시 데이터 보호가 필요하면 peek/commit/rollback을 직접 사용.
+        Atomically performs peek() + commit().
+        Kept for backward compatibility with existing code.
+        If data protection is needed on INSERT failure, use peek/commit/rollback directly.
         """
         records = self.peek()
         if records:
             self.commit()
         return records
 
-    # ── 내부 헬퍼 ────────────────────────────────────────
+    # ── Internal helpers ────────────────────────────────────────
 
     def _read_lines(self) -> list[str]:
         if self.path.stat().st_size == 0:
@@ -227,7 +226,7 @@ class FileQueue:
             return False
 
     def _recover_pending(self) -> int:
-        """재시작 시 Pending 줄을 Queued로 되돌림. 복구된 건수 반환."""
+        """재시작 시 Pending 라인들을 다시 Queued 상태로 복구합니다. 복구된 레코드 수를 반환합니다."""
         with self._lock:
             lines     = self._read_lines()
             new_lines = []
@@ -256,20 +255,20 @@ class FileQueue:
             return recovered
 
     def _drop_oldest(self, needed_bytes: int):
-        """용량 초과 시 가장 오래된 Queued 줄부터 제거."""
+        """용량(capacity)을 초과할 경우, 가장 오래된 Queued 라인부터 순차적으로 제거합니다."""
         lines = self._read_lines()
 
         dropped, freed = 0, 0
         for line in lines:
             if freed >= needed_bytes:
                 break
-            # Pending 줄은 처리 중이므로 드롭하지 않음
+            # 현재 처리 중인 Pending 라인은 드롭하지 않고 유지합니다.
             if self._is_status(line, _STATUS_PENDING):
                 continue
             freed   += len(line.encode())
             dropped += 1
 
-        # 앞에서부터 Queued 줄만 제거 (Pending은 보존)
+        # 가장 앞쪽에 있는 Queued 라인만 제거합니다 (Pending 라인은 유지됩니다).
         kept, removed = [], 0
         for line in lines:
             if removed < dropped and not self._is_status(line, _STATUS_PENDING):
@@ -278,4 +277,4 @@ class FileQueue:
                 kept.append(line)
 
         self._write_lines(kept)
-        self.log.warning(f"PQ 용량 초과 — {removed}줄 drop ({freed / 1024:.1f} KB 확보)")
+        self.log.warning(f"[PQ] Capacity exceeded - Dropped {removed} lines ({freed / 1024:.1f} KB freed)")

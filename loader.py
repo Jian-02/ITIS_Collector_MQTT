@@ -1,14 +1,14 @@
 """
 loader.py
-Polls FileQueue and loads records into the database in batches.
-Supports PostgreSQL, MSSQL, and Oracle.
+FileQueue를 폴링하여 레코드를 배치 단위로 데이터베이스에 로드합니다.
+PostgreSQL, MSSQL, Oracle을 지원합니다.
 
-2단계 커밋 흐름
+Two-phase commit flow
 ──────────────────────────────────────────────────
-  1. queue.peek()          → Queued 레코드 읽기 + 파일 내 상태를 Pending으로 전환
-  2. adapter.insert_batch()→ DB INSERT 시도
-  3. 성공 → queue.commit()  : Pending 줄 파일에서 제거
-     실패 → queue.rollback(): Pending 줄을 Queued로 복원 후 재연결 대기
+  1. queue.peek()           → Queued 레코드를 읽고 파일 내 상태를 Pending으로 변경
+  2. adapter.insert_batch() → DB INSERT 시도
+  3. 성공 시 → queue.commit()   : 파일에서 Pending 라인을 제거
+     실패 시 → queue.rollback() : Pending 라인을 Queued로 복구한 후, 재연결을 위해 대기
 ──────────────────────────────────────────────────
 """
 
@@ -132,11 +132,11 @@ def _format_sql(template: str, table_name: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════
-# DB adapters (abstract base and implementations)
+# DB adapters (abstract base 및 구현체)
 # ══════════════════════════════════════════════════════════
 
 class BaseDBAdapter(ABC):
-    """Encapsulates database-specific connection, DDL, and INSERT behavior."""
+    """데이터베이스별 연결, DDL 및 INSERT 동작을 캡슐화합니다."""
 
     def __init__(self, cfg: DBConfig):
         self.cfg = cfg
@@ -171,7 +171,7 @@ class PostgreSQLAdapter(BaseDBAdapter):
             host=cfg.host, port=cfg.port,
             dbname=cfg.name, user=cfg.user, password=cfg.password,
         )
-        self.log.info("PostgreSQL 연결 성공")
+        self.log.info("PostgreSQL connection successful")
 
     def ensure_table(self):
         with self._conn.cursor() as cur:
@@ -201,7 +201,7 @@ class MSSQLAdapter(BaseDBAdapter):
             f"PWD={cfg.password}"
         )
         self._conn = pyodbc.connect(conn_str)
-        self.log.info("MSSQL 연결 성공")
+        self.log.info("MSSQL connection successful")
 
     def ensure_table(self):
         cur = self._conn.cursor()
@@ -226,7 +226,7 @@ class OracleAdapter(BaseDBAdapter):
         cfg = self.cfg
         dsn = cx_Oracle.makedsn(cfg.host, cfg.port, service_name=cfg.name)
         self._conn = cx_Oracle.connect(user=cfg.user, password=cfg.password, dsn=dsn)
-        self.log.info("Oracle 연결 성공")
+        self.log.info("Oracle connection successful")
 
     def ensure_table(self):
         cur = self._conn.cursor()
@@ -259,11 +259,11 @@ def make_adapter(cfg: DBConfig) -> BaseDBAdapter:
 
 class DBLoader:
     """
-    Polls FileQueue and loads records into the database in batches.
+    FileQueue를 폴링하여 레코드를 배치 단위로 데이터베이스에 로드합니다.
 
-    2단계 커밋으로 데이터 유실을 방지:
-      peek() → insert_batch() → commit()   (성공 경로)
-      peek() → insert_batch() → rollback() (실패 경로)
+    Two-phase commit 방식을 사용하여 데이터 유실을 방지합니다:
+    peek() → insert_batch() → commit()   (성공 경로)
+    peek() → insert_batch() → rollback() (실패 경로)
     """
 
     def __init__(self, db_cfg: DBConfig, loader_cfg: LoaderConfig, queue: FileQueue):
@@ -275,13 +275,13 @@ class DBLoader:
 
     def _connect(self, max_attempts: int = 0):
         """
-        DB에 연결하고 테이블을 준비한다.
+        DB에 연결하고 테이블을 준비합니다.
 
         Parameters
         ----------
         max_attempts : int
-            0 (기본값) → 성공할 때까지 무한 재시도 (운영 모드)
-            1 이상     → 해당 횟수만큼만 시도 후 마지막 예외를 raise (테스트 모드)
+            0 (기본값) → 성공할 때까지 무한 재시도합니다 (프로덕션 모드).
+            1 이상     → 지정된 횟수만큼만 시도한 후, 마지막 예외를 발생시킵니다 (테스트 모드).
         """
         self._adapter = make_adapter(self.db_cfg)
         attempt = 0
@@ -290,13 +290,13 @@ class DBLoader:
             try:
                 self._adapter.connect()
                 self._adapter.ensure_table()
-                self.log.info("테이블 준비 완료")
+                self.log.info("Table ready")
                 return
             except Exception as e:
-                self.log.warning(f"DB 연결 실패 ({attempt}회): {e}")
+                self.log.warning(f"DB connection failed (attempt {attempt}): {e}")
                 if max_attempts and attempt >= max_attempts:
                     raise
-                self.log.warning("5초 후 재시도")
+                self.log.warning("Retrying in 5 seconds")
                 time.sleep(5)
 
     def _to_rows(self, records: list) -> list[tuple]:
@@ -315,7 +315,7 @@ class DBLoader:
         ]
 
     def _process(self):
-        # ── Phase 1: 큐에서 읽기 (파일 내 상태: Queued → Pending) ──
+        # ── Phase 1: queue에서 읽기 (파일 상태: Queued → Pending) ──
         records = self.queue.peek()
         if not records:
             return
@@ -327,26 +327,26 @@ class DBLoader:
             for i in range(0, len(rows), self.loader_cfg.batch_size):
                 self._adapter.insert_batch(rows[i : i + self.loader_cfg.batch_size])
 
-            # ── Phase 3 (성공): Pending 줄 파일에서 제거 ────────────
+            # ── Phase 3 (성공): 파일에서 Pending 라인 제거 ────────────
             self.queue.commit()
-            self.log.info(f"{len(rows)}건 INSERT 완료")
+            self.log.info(f"Inserted {len(rows)} record(s)")
 
         except Exception as e:
-            # ── Phase 3 (실패): Pending → Queued 복원 ───────────────
-            self.log.error(f"INSERT 실패, Pending 레코드를 Queued로 복원: {e}")
+            # ── Phase 3 (실패): Pending → Queued 상태로 복구 ───────────────
+            self.log.error(f"INSERT failed, restoring Pending records to Queued: {e}")
             self.queue.rollback()
-            # run() 루프가 재연결하도록 예외를 다시 던짐
+            # Re-raise so the run() loop will reconnect
             raise
 
     def run(self):
         self._connect()
-        self.log.info(f"폴링 시작 (간격: {self.loader_cfg.poll_interval}초, DB: {self.db_cfg.db_type})")
+        self.log.info(f"Starting polling (interval: {self.loader_cfg.poll_interval}s, DB: {self.db_cfg.db_type})")
 
         while True:
             try:
                 self._process()
             except Exception as e:
-                self.log.error(f"DB 오류: {e} — 재연결 시도")
+                self.log.error(f"DB error: {e} — attempting to reconnect")
                 self._connect()
 
             time.sleep(self.loader_cfg.poll_interval)

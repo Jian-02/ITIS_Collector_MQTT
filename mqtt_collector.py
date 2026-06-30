@@ -1,6 +1,6 @@
 """
 collector.py
-Subscribes to an MQTT broker and stores received messages in FileQueue.
+MQTT 브로커를 구독하고 수신된 메시지를 FileQueue에 저장합니다.
 """
 
 import json
@@ -12,7 +12,7 @@ import paho.mqtt.client as mqtt
 
 from config import MQTTConfig, MapperConfig
 from file_queue import FileQueue
-from mapper import PayloadMapper
+from data_mapper import PayloadMapper
 
 
 class MQTTCollector:
@@ -32,11 +32,11 @@ class MQTTCollector:
 
     def _on_connect(self, client, userdata, flags, rc):
         if rc == 0:
-            self.log.info("MQTT 연결 성공")
+            self.log.info("MQTT Connection Succesful")
             client.subscribe(self.cfg.topic)
-            self.log.info(f"토픽 구독: {self.cfg.topic}")
+            self.log.info(f"Subscribe Topice: {self.cfg.topic}")
         else:
-            self.log.error(f"MQTT 연결 실패 (rc={rc})")
+            self.log.error(f"MQTT Connection Fail (rc={rc})")
 
     def _on_message(self, client, userdata, msg):
         received_at = datetime.now(timezone.utc).isoformat()
@@ -51,7 +51,7 @@ class MQTTCollector:
         )
 
         self.queue.append(record)
-        self.log.debug(f"큐 적재: {msg.topic}")
+        self.log.debug(f"Enqueued message to topic: {msg.topic}")
 
     def _parse_topic(self, topic: str) -> dict:
         parts = topic.split("/")
@@ -68,9 +68,9 @@ class MQTTCollector:
     def run(self):
         while True:
             try:
-                self.log.info(f"MQTT 연결 시도: {self.cfg.host}:{self.cfg.port}")
+                self.log.info(f"MQTT Try Connection: {self.cfg.host}:{self.cfg.port}")
                 self._client.connect(self.cfg.host, self.cfg.port, keepalive=60)
                 self._client.loop_forever()
             except (ConnectionRefusedError, OSError) as e:
-                self.log.warning(f"연결 실패: {e} — 5초 후 재시도")
+                self.log.warning(f"Connection failed: {e}. Retrying in 5 seconds.")
                 time.sleep(5)

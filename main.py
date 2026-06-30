@@ -1,8 +1,8 @@
 """
 main.py
-Entry point that starts MQTTCollector and DBLoader.
+MQTTCollector와 DBLoader를 시작하는 진입점(Entry point)입니다.
 
-Run with: python main.py
+실행 방법: python main.py
 """
 
 import threading
@@ -10,7 +10,7 @@ import threading
 from config import MQTTConfig, QueueConfig, DBConfig, LoaderConfig, MapperConfig, LogConfig
 from logger import setup_logger
 from file_queue import FileQueue
-from collector import MQTTCollector
+from mqtt_collector import MQTTCollector
 from loader import DBLoader
 
 
@@ -25,7 +25,7 @@ def main():
     t = threading.Thread(target=loader.run, daemon=True, name="loader")
     t.start()
 
-    collector.run()  # Blocks the main thread
+    collector.run()  # 메인 스레드를 블로킹(대기)합니다.
 
 
 if __name__ == "__main__":

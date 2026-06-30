@@ -1,8 +1,8 @@
 """
-pytest auto-load settings for tests.
+테스트를 위한 pytest 자동 로드 설정입니다.
 
-DB tests use .env.test when present. For PostgreSQL, the test fixture can also
-create the configured database before creating the sensor_data table.
+DB 테스트는 .env.test 파일이 존재할 경우 이를 사용합니다. PostgreSQL의 경우,
+테스트 픽스처(fixture)가 sensor_data 테이블을 생성하기 전에 구성된 데이터베이스를 직접 생성할 수도 있습니다.
 """
 
 import os
@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# 2. 최상단: .env.test 파일을 시스템 환경 변수에 즉시 주입 (override=True로 운영값 덮어쓰기)
+# 파일 최상단: .env.test 내용을 시스템 환경 변수에 즉시 주입 (override=True로 프로덕션 값을 덮어씀)
 env_test_path = Path(__file__).parent.parent / ".env.test"
 if env_test_path.exists():
     load_dotenv(dotenv_path=env_test_path, override=True)
@@ -23,25 +23,25 @@ from config import DBConfig
 from unittest.mock import MagicMock
 import pytest
 
-# ── Mock external libraries (fallback for missing installations) ──
+# ── 외부 라이브러리 모킹 (설치되지 않은 경우를 위한 폴백) ──
 for mod in ["paho", "paho.mqtt", "paho.mqtt.client"]:
     if mod not in sys.modules:
         sys.modules[mod] = MagicMock()
 
-# ── Source root path addition ──────────────────────────────
+# ── 소스 루트 경로 추가 ──────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 # ── Test DB Load ───────────────────────────────────────
 def test_db_loader(default: str = "sensor_data_test") -> str:
-    # 이제 여기서는 안전하게 테스트 DB 설정이 적용됩니다.
+    # 이 시점에서는 테스트 DB 설정이 안전하게 적용된 상태입니다.
     cfg = DBConfig.from_env() 
     print("현재 로드된 테이블명:", os.getenv("DB_TABLE_NAME"))
     print("현재 APP_ENV 상태:", os.getenv("APP_ENV"))
     assert cfg.table_name == "sensor_data_test"  # .env.test에 지정한 테이블명
     return default
 
-# ── Common Util ────────────────────────────────────────────
+# ── 공통 Util ────────────────────────────────────────────
 def _truncate_table(adapter, db_type: str):
     # Delete only data. Maintain data structure"
     truncate_sql = {
@@ -91,10 +91,10 @@ def _ensure_postgresql_database(cfg):
 @pytest.fixture(scope="session")
 def db_adapter():
     """
-    Return readl DB Adapter.
-    - DB Connect
-    - Create Table If not exist (IF NOT EXISTS in function ensure_table)
-    If connection fails, All test skip.
+    실제 DB 어댑터를 반환합니다.
+    - DB 연결
+    - 테이블이 없으면 생성 (ensure_table 함수 내의 IF NOT EXISTS 활용)
+    만약 연결에 실패하면, 모든 테스트를 건너뜁니다(skip).
     """
     from config import DBConfig
     from loader import make_adapter
@@ -132,8 +132,8 @@ def db_adapter():
 @pytest.fixture(scope="function")
 def clean_test_table(db_adapter):
     """
-    Keep table data so test inserts can be inspected after pytest finishes.
-    Maintain table schema.
+    pytest가 종료된 후에도 테스트로 삽입된 데이터를 확인할 수 있도록 테이블 데이터를 유지합니다.
+    테이블 스키마 역시 그대로 유지합니다.
     """
     from config import DBConfig
 

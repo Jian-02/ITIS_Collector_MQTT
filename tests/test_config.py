@@ -1,6 +1,6 @@
 """
 tests/config_test.py
-Config dataclass tests
+설정(Config) 데이터클래스 테스트
 """
 
 import sys
@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import MQTTConfig, QueueConfig, DBConfig, LoaderConfig, MapperConfig, SUPPORTED_DB_TYPES
+from config import MQTTConfig, QueueConfig, LoaderConfig, MapperConfig, SUPPORTED_DB_TYPES
 
 
 class MQTTConfigTest(unittest.TestCase):
@@ -50,7 +50,7 @@ class DBConfigTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             db_type = "mongodb"
             if db_type not in SUPPORTED_DB_TYPES:
-                raise ValueError(f"지원하지 않는 DB_TYPE: {db_type}")
+                raise ValueError(f"Unsupported DB_TYPE: {db_type}")
 
     def test_supported_db_types(self):
         for db_type in ("postgresql", "mssql", "oracle"):
