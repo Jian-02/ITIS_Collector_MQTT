@@ -4,132 +4,188 @@ PayloadMapper tests
 """
 
 import json
+import os
 import sys
 import tempfile
-import unittest
+import pytest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from data_mapper import PayloadMapper
 
 
-def _make_mapper(mapping: dict) -> PayloadMapper:
-    # delete=False로 설정하여 콘텍스트가 끝나도 파일이 유지되도록 함
-    with tempfile.NamedTemporaryFile(suffix=".json", mode="w", encoding="utf-8", delete=False) as f:
-        json.dump({"mapping": mapping}, f)
-        tmp_path = Path(f.name)
-        
-    return PayloadMapper(tmp_path)
+@pytest.fixture
+def make_mapper():
+    """PayloadMapper 인스턴스를 생성하는 팩토리 피스처"""
+    def _create(mapping: dict) -> PayloadMapper:
+        fd, path_str = tempfile.mkstemp(suffix=".json")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump({"mapping": mapping}, f)
+        except Exception:
+            os.unlink(path_str)
+            raise
+        return PayloadMapper(Path(path_str))
+    return _create
 
 
-BASE_ARGS = dict(
-    topic      = "factory/line1/temp",
-    topic_meta = {"site": "factory", "device": "line1", "sensor": "temp"},
-    received_at= "2026-06-01T00:00:00+00:00",
-)
+@pytest.fixture
+def base_args():
+    return dict(
+        topic="factory/line1/temp",
+        topic_meta={"site": "factory", "device": "line1", "sensor": "temp"},
+        received_at="2026-06-01T00:00:00+00:00",
+    )
 
 
-class BasicMappingTest(unittest.TestCase):
-
-    def test_topic_field_mapped(self):
+class BasicMappingTest:
+    def test_topic_field_mapped(self, make_mapper, base_args):
         """메타데이터인 'topic' 필드로부터 값이 정상적으로 매핑되는지 확인"""
-        mapper = _make_mapper({"topic": "topic"})
-        record = mapper.build_record(payload={}, **BASE_ARGS)
-        self.assertEqual(record["topic"], "factory/line1/temp")
+        mapper = make_mapper({"topic": "topic"})
+        record = mapper.build_record(payload={}, **base_args)
+        assert record["topic"] == "factory/line1/temp"
 
-    def test_payload_field_mapped(self):
+    def test_payload_field_mapped(self, make_mapper, base_args):
         """페이로드의 최상위(root) 필드 값이 정상적으로 매핑되는지 확인"""
-        mapper = _make_mapper({"value": "payload.value"})
-        record = mapper.build_record(payload={"value": 23.5}, **BASE_ARGS)
-        self.assertEqual(record["value"], 23.5)
+        mapper = make_mapper({"value": "payload.value"})
+        record = mapper.build_record(payload={"value": 23.5}, **base_args)
+        assert record["value"] == 23.5
 
-    def test_nested_payload_path(self):
+    def test_nested_payload_path(self, make_mapper, base_args):
         """온점(.) 표기법을 사용한 객체 내부 깊숙한(Nested) 필드 값이 정상 매핑되는지 확인"""
-        mapper = _make_mapper({"deep": "payload.a.b.c"})
-        record = mapper.build_record(payload={"a": {"b": {"c": 42}}}, **BASE_ARGS)
-        self.assertEqual(record["deep"], 42)
+        mapper = make_mapper({"deep": "payload.a.b.c"})
+        record = mapper.build_record(payload={"a": {"b": {"c": 42}}}, **base_args)
+        assert record["deep"] == 42
 
-    def test_missing_nested_path_returns_none(self):
+    def test_missing_nested_path_returns_none(self, make_mapper, base_args):
         """매핑하려는 중첩 경로의 중간 필드가 존재하지 않을 때 안전하게 None을 반환하는지 확인"""
-        mapper = _make_mapper({"v": "payload.a.b.c"})
-        record = mapper.build_record(payload={"a": {}}, **BASE_ARGS)
-        self.assertIsNone(record["v"])
+        mapper = make_mapper({"v": "payload.a.b.c"})
+        record = mapper.build_record(payload={"a": {}}, **base_args)
+        assert record["v"] is None
 
 
-class ReservedKeywordTest(unittest.TestCase):
-
-    def test_received_at_reserved(self):
+class ReservedKeywordTest:
+    def test_received_at_reserved(self, make_mapper, base_args):
         """수신 시간 예약어(__received_at__) 매핑 기능 검증"""
-        mapper = _make_mapper({"recv": "__received_at__"})
-        record = mapper.build_record(payload={}, **BASE_ARGS)
-        self.assertEqual(record["recv"], BASE_ARGS["received_at"])
+        mapper = make_mapper({"recv": "__received_at__"})
+        record = mapper.build_record(payload={}, **base_args)
+        assert record["recv"] == base_args["received_at"]
 
-    def test_payload_reserved(self):
+    def test_payload_reserved(self, make_mapper, base_args):
         """전체 페이로드 예약어(__payload__) 매핑 기능 검증"""
         payload = {"value": 1, "extra": "x"}
-        mapper  = _make_mapper({"raw": "__payload__"})
-        record  = mapper.build_record(payload=payload, **BASE_ARGS)
-        self.assertEqual(record["raw"], payload)
+        mapper = make_mapper({"raw": "__payload__"})
+        record = mapper.build_record(payload=payload, **base_args)
+        assert record["raw"] == payload
 
-    def test_topic_site_reserved(self):
+    def test_topic_site_reserved(self, make_mapper, base_args):
         """토픽 내 사이트(Site) 정보 예약어(__topic_site__) 추출 기능 검증"""
-        mapper = _make_mapper({"site": "__topic_site__"})
-        record = mapper.build_record(payload={}, **BASE_ARGS)
-        self.assertEqual(record["site"], "factory")
+        mapper = make_mapper({"site": "__topic_site__"})
+        record = mapper.build_record(payload={}, **base_args)
+        assert record["site"] == "factory"
 
-    def test_topic_device_reserved(self):
+    def test_topic_device_reserved(self, make_mapper, base_args):
         """토픽 내 디바이스(Device) 정보 예약어(__topic_device__) 추출 기능 검증"""
-        mapper = _make_mapper({"device": "__topic_device__"})
-        record = mapper.build_record(payload={}, **BASE_ARGS)
-        self.assertEqual(record["device"], "line1")
+        mapper = make_mapper({"device": "__topic_device__"})
+        record = mapper.build_record(payload={}, **base_args)
+        assert record["device"] == "line1"
 
-    def test_topic_sensor_reserved(self):
+    def test_topic_sensor_reserved(self, make_mapper, base_args):
         """토픽 내 센서(Sensor) 정보 예약어(__topic_sensor__) 추출 기능 검증"""
-        mapper = _make_mapper({"sensor": "__topic_sensor__"})
-        record = mapper.build_record(payload={}, **BASE_ARGS)
-        self.assertEqual(record["sensor"], "temp")
+        mapper = make_mapper({"sensor": "__topic_sensor__"})
+        record = mapper.build_record(payload={}, **base_args)
+        assert record["sensor"] == "temp"
 
 
-class ValidationTest(unittest.TestCase):
-
+class ValidationTest:
     def test_missing_mapping_key_raises(self):
         """매핑 파일에 필수 루트 키("mapping")가 누락되었을 때 ValueError가 발생하는지 테스트"""
         tmp = Path(tempfile.mktemp(suffix=".json"))
         tmp.write_text(json.dumps({"wrong_key": {}}), encoding="utf-8")
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             PayloadMapper(tmp)
 
     def test_empty_mapping_raises(self):
         """매핑 파일이 완전히 비어 있을 때 ValueError가 발생하는지 테스트"""
         tmp = Path(tempfile.mktemp(suffix=".json"))
         tmp.write_text(json.dumps({}), encoding="utf-8")
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             PayloadMapper(tmp)
 
 
-class EndToEndTest(unittest.TestCase):
-
+class EndToEndTest:
     def test_full_default_mapping(self):
         """기본 mapping.json 파일을 사용하여 전체 매핑 프로세스의 E2E 동작을 검증"""
         mapping_path = Path(__file__).parent.parent / "mapping.json"
-        mapper  = PayloadMapper(mapping_path)
+        mapper = PayloadMapper(mapping_path)
         payload = {"value": 99.9, "ts": "2026-06-01T12:00:00Z"}
-        record  = mapper.build_record(
-            topic      = "site1/dev1/sensor1",
-            payload    = payload,
-            topic_meta = {"site": "site1", "device": "dev1", "sensor": "sensor1"},
-            received_at= "2026-06-01T12:00:01Z",
+        record = mapper.build_record(
+            topic="site1/dev1/sensor1",
+            payload=payload,
+            topic_meta={"site": "site1", "device": "dev1", "sensor": "sensor1"},
+            received_at="2026-06-01T12:00:01Z",
         )
-        self.assertEqual(record["topic"],       "site1/dev1/sensor1")
-        self.assertEqual(record["site"],        "site1")
-        self.assertEqual(record["device"],      "dev1")
-        self.assertEqual(record["sensor"],      "sensor1")
-        self.assertEqual(record["value"],       99.9)
-        self.assertEqual(record["ts"],          "2026-06-01T12:00:00Z")
-        self.assertEqual(record["received_at"], "2026-06-01T12:00:01Z")
-        self.assertEqual(record["payload"],     payload)
+        assert record["topic"] == "site1/dev1/sensor1"
+        assert record["site"] == "site1"
+        assert record["device"] == "dev1"
+        assert record["sensor"] == "sensor1"
+        assert record["value"] == 99.9
+        assert record["ts"] == "2026-06-01T12:00:00Z"
+        assert record["received_at"] == "2026-06-01T12:00:01Z"
+        assert record["payload"] == payload
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
+class ColumnIsolationTest:
+    def test_exception_in_one_column_does_not_raise(self, make_mapper, base_args):
+        """_dig에서 예외가 나도 build_record 자체는 예외를 전파하지 않아야 한다."""
+        mapper = make_mapper({"ok_col": "payload.value", "bad_col": "payload.a"})
+        with patch.object(mapper, "_dig", side_effect=RuntimeError("dig error")):
+            # 예외가 발생하지 않는지 확인
+            mapper.build_record(payload={"value": 1}, **base_args)
+
+    def test_failed_column_becomes_none(self, make_mapper, base_args):
+        """_dig에서 예외가 난 컬럼은 None이어야 한다."""
+        mapper = make_mapper({"bad_col": "payload.a.b.c"})
+        with patch.object(mapper, "_dig", side_effect=RuntimeError("dig error")):
+            record = mapper.build_record(payload={}, **base_args)
+        assert record["bad_col"] is None
+
+    def test_healthy_columns_still_mapped_after_one_failure(self, make_mapper, base_args):
+        """한 컬럼이 실패해도 그 이후 컬럼들은 정상적으로 매핑되어야 한다."""
+        mapper = make_mapper({
+            "bad_col": "payload.bad",
+            "topic_col": "topic",
+            "site_col": "__topic_site__",
+        })
+        call_count = {"n": 0}
+        original_dig = mapper._dig
+
+        def flaky_dig(data, path):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError("first dig fails")
+            return original_dig(data, path)
+
+        mapper._dig = flaky_dig
+        record = mapper.build_record(payload={"bad": "x"}, **base_args)
+
+        assert record["bad_col"] is None
+        assert record["topic_col"] == "factory/line1/temp"
+        assert record["site_col"] == "factory"
+
+    def test_invalid_mapping_source_type_becomes_none(self, make_mapper, base_args):
+        """src가 문자열이 아닌 값(예: 숫자)이 들어와도 예외 없이 None이 되어야 한다."""
+        mapper = make_mapper({"col": "payload.value"})
+        mapper.mapping = {"col": 12345}
+        record = mapper.build_record(payload={"value": 1}, **base_args)
+        assert record["col"] is None
+
+    def test_warning_logged_on_column_failure(self, make_mapper, base_args, caplog):
+        """컬럼 처리 실패 시 WARNING 로그가 찍혀야 한다."""
+        mapper = make_mapper({"bad_col": "payload.a"})
+        with patch.object(mapper, "_dig", side_effect=RuntimeError("dig error")):
+            with caplog.at_level("WARNING"):
+                mapper.build_record(payload={}, **base_args)
+                assert any("bad_col" in record.message for record in caplog.records)

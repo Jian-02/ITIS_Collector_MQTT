@@ -3,6 +3,15 @@ logger.py
 파일명: collector_YYYYMMDD_HHMMSS.log
 - 현재 파일이 max_bytes를 초과하면 시간 기반의 새 파일을 생성합니다.
 - 파일 수가 max_files를 초과하면 가장 오래된 파일부터 순차적으로 삭제합니다.
+
+로그 포맷
+---------
+2026-06-30 12:00:00 [MQTTCollector] [INFO] MQTT Connection Succesful
+
+레벨(LEVEL)을 대괄호로 감싸 한눈에 INFO/WARNING/ERROR를 구분할 수 있도록 합니다.
+- INFO    : 정상 흐름 (연결 성공, N건 적재 완료, polling 시작 등)
+- WARNING : 즉시 장애는 아니지만 주의가 필요한 상황 (재시도, 큐 사용량 80% 이상, crash recovery 등)
+- ERROR   : 실제 실패/데이터 유실 위험 상황 (DB INSERT 실패, PQ FULL, 매핑 실패, 연결 포기 등)
 """
 
 import glob
@@ -88,7 +97,7 @@ def setup_logger(cfg: LogConfig) -> None:
     main.py에서 한 번만 호출하면 됩니다.
     """
     fmt = logging.Formatter(
-        "%(asctime)s [%(name)s] %(levelname)s %(message)s",
+        "%(asctime)s [%(name)s] [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 

@@ -19,7 +19,17 @@ two-phase commit 방식의 JSONL 기반 persistent queue입니다.
  Crash recovery (재시작 시 __init__ 내부에서 수행):
     "P" line이 남아있으면 자동으로 "Q"로 revert됨
     → 다음 peek() 시점에 reprocessed됨
- 
+
+ 용량 초과(Full) 처리 정책:
+    append() 시점에 size_limit_enabled=True 이고 max_bytes를 초과하면
+    QueueFullError를 발생시켜 "신규 데이터 적재를 거부"합니다 (오래된 데이터를 덮어쓰지 않음).
+    호출부(mqtt_collector)는 이 예외를 잡아서 해당 메시지 1건만 드롭하고 ERROR 레벨로 로그를 남기며,
+    전체 프로세스는 계속 동작합니다 (= 큐가 가득 찼다고 collector/loader 자체가 죽지는 않습니다).
+    또한 사용량이 WARN_THRESHOLD(기본 80%)를 넘으면 사전 경고(WARNING) 로그를 남겨,
+    실제로 가득 차서 데이터가 유실되기 전에 운영자가 인지할 수 있도록 합니다.
+    (현재는 로그 기반 알림이며, 추후 관리 웹페이지/모니터링 시스템에서 이 로그를 수집해
+     Slack/이메일 알람으로 연동하는 것을 권장합니다. 지금 단계에서 알람 채널까지 직접
+     구현하는 것은 과한 결합이라 판단하여 로그 레벨 분리까지만 우선 처리했습니다.)
 ──────────────────────────────────────────────────
 """
 
@@ -33,6 +43,8 @@ from config import QueueConfig
 _STATUS_QUEUED  = "Q"
 _STATUS_PENDING = "P"
 _STATUS_KEY     = "_s"
+
+_WARN_THRESHOLD = 0.8  # 용량의 80%를 넘으면 경고 로그
 
 
 def _mark(record: dict, status: str) -> dict:
@@ -70,6 +82,7 @@ class FileQueue:
         self.max_bytes          = cfg.max_bytes
         self._lock              = threading.Lock()
         self.log                = logging.getLogger(self.__class__.__name__)
+        self._warned_full       = False  # 경고 로그 중복 방지 플래그
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not self.path.exists():
@@ -94,9 +107,27 @@ class FileQueue:
 
         with self._lock:
             if self.size_limit_enabled:
-                 # os.path.getsize/stat이 이제 실시간으로 file 상태를 반영합니다.
-                if self.path.exists() and (self.path.stat().st_size + line_bytes > self.max_bytes):
+                current_size = self.path.stat().st_size if self.path.exists() else 0
+
+                if current_size + line_bytes > self.max_bytes:
+                    self.log.error(
+                        f"[PQ FULL] Queue capacity exceeded "
+                        f"({current_size}/{self.max_bytes} bytes). New data rejected."
+                    )
                     raise QueueFullError("Queue storage capacity exceeded.")
+
+                # 용량 임계치(기본 80%) 근접 시 사전 경고 (한 번만, 다시 여유가 생기면 재경고 가능하도록 리셋)
+                usage_ratio = (current_size + line_bytes) / self.max_bytes
+                if usage_ratio >= _WARN_THRESHOLD:
+                    if not self._warned_full:
+                        self.log.warning(
+                            f"[PQ WARNING] Queue usage at {usage_ratio:.0%} "
+                            f"({current_size + line_bytes}/{self.max_bytes} bytes). "
+                            f"Check DB connectivity/loader status before it becomes full."
+                        )
+                        self._warned_full = True
+                else:
+                    self._warned_full = False
 
             # file에 쓰고 '즉각적인' flush + disk로의 fsync를 강제합니다.
             with open(self.path, "a", encoding="utf-8") as f:

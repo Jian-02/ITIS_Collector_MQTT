@@ -179,6 +179,8 @@ class PostgreSQLAdapter(BaseDBAdapter):
         self._conn.commit()
 
     def insert_batch(self, rows: list[tuple]):
+        if not rows:
+            return
         import psycopg2.extras
         with self._conn.cursor() as cur:
             psycopg2.extras.execute_values(cur, self._insert_sql(), rows)
@@ -210,6 +212,8 @@ class MSSQLAdapter(BaseDBAdapter):
         cur.close()
 
     def insert_batch(self, rows: list[tuple]):
+        if not rows:
+            return
         cur = self._conn.cursor()
         cur.executemany(self._insert_sql(), rows)
         self._conn.commit()
@@ -235,6 +239,8 @@ class OracleAdapter(BaseDBAdapter):
         cur.close()
 
     def insert_batch(self, rows: list[tuple]):
+        if not rows:
+            return
         cur = self._conn.cursor()
         cur.executemany(self._insert_sql(), rows)
         self._conn.commit()
@@ -273,6 +279,7 @@ class DBLoader:
         self.log        = logging.getLogger(self.__class__.__name__)
         self._adapter   = None
         self._running = True
+        self._consecutive_failures = 0
 
     def stop(self):
         self._running = False
@@ -288,9 +295,12 @@ class DBLoader:
         Parameters
         ----------
         max_attempts : int
-            0 (기본값) → 성공할 때까지 무한 재시도합니다 (프로덕션 모드).
-            1 이상     → 지정된 횟수만큼만 시도한 후, 마지막 예외를 발생시킵니다 (테스트 모드).
+            0 (기본값) → LoaderConfig.max_retries 정책을 따릅니다
+                         (max_retries=0 이면 무한 재시도, 그 외는 해당 횟수만큼 시도 후 예외 발생).
+            1 이상     → 지정된 횟수만큼만 시도한 후, 마지막 예외를 발생시킵니다 (테스트 모드 등에서 명시적으로 override).
         """
+        effective_max = max_attempts if max_attempts else self.loader_cfg.max_retries
+
         self._adapter = make_adapter(self.db_cfg)
         attempt = 0
         while True:
@@ -302,10 +312,13 @@ class DBLoader:
                 return
             except Exception as e:
                 self.log.warning(f"DB connection failed (attempt {attempt}): {e}")
-                if max_attempts and attempt >= max_attempts:
+                if effective_max and attempt >= effective_max:
+                    self.log.error(
+                        f"DB connection failed {attempt} times in a row (limit={effective_max}). Giving up."
+                    )
                     raise
-                self.log.warning("Retrying in 5 seconds")
-                time.sleep(5)
+                self.log.warning(f"Retrying in {self.loader_cfg.retry_interval} seconds")
+                time.sleep(self.loader_cfg.retry_interval)
 
     def _to_rows(self, records: list) -> list[tuple]:
         return [
@@ -331,7 +344,7 @@ class DBLoader:
         rows = self._to_rows(records)
 
         try:
-            # ── Phase 2: DB INSERT ──────────────────────────────────
+            # ── Phase 2: DB INSERT (batch_size 단위로 분할하여 처리) ──
             for i in range(0, len(rows), self.loader_cfg.batch_size):
                 self._adapter.insert_batch(rows[i : i + self.loader_cfg.batch_size])
 
@@ -353,11 +366,33 @@ class DBLoader:
         while self._running:
             try:
                 self._process()
+                self._consecutive_failures = 0
             except Exception as e:
-                self.log.error(f"DB error: {e} — attempting to reconnect")
-                self._connect()
+                self._consecutive_failures += 1
+                self.log.error(
+                    f"DB error ({self._consecutive_failures} consecutive failure(s)): {e} — "
+                    f"attempting to reconnect in {self.loader_cfg.retry_interval}s"
+                )
+                time.sleep(self.loader_cfg.retry_interval)
+                try:
+                    self._connect()
+                except Exception:
+                    # max_retries에 도달해 _connect()가 예외를 던진 경우: loader를 중단합니다.
+                    self.log.error(
+                        "DB reconnection limit reached. Stopping DBLoader "
+                        "(queued data remains safely on disk in the PQ file)."
+                    )
+                    self._running = False
+                    break
 
             time.sleep(self.loader_cfg.poll_interval)
-        
+
         self.log.info("DBLoader stopped.")
-        self._disconnect() # 루프 종료 후 DB 연결 종료 로직(필요 시)
+        self._disconnect()  # 루프 종료 후 DB 연결 종료 로직(필요 시)
+
+    def _disconnect(self):
+        if self._adapter is not None:
+            try:
+                self._adapter.close()
+            except Exception as e:
+                self.log.warning(f"Error while closing DB connection: {e}")

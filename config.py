@@ -31,20 +31,24 @@ def _get_bool(key: str, default: bool = True) -> bool:
 
 @dataclass
 class MQTTConfig:
-    host:     str = ""
-    port:     int = 1883
-    topic:    str = "#"
-    username: str = ""
-    password: str = ""
+    host:           str = ""
+    port:           int = 1883
+    topic:          str = "#"
+    username:       str = ""
+    password:       str = ""
+    retry_interval: int = 5   # 연결 실패 시 재시도 대기(초)
+    max_retries:    int = 0   # 0 = 무한 재시도. N>0 이면 N회 연속 실패 시 collector를 중단합니다.
 
     @classmethod
     def from_env(cls) -> "MQTTConfig":
         return cls(
-            host     = _get("MQTT_HOST", "localhost"),
-            port     = int(_get("MQTT_PORT", "1883")),
-            topic    = _get("MQTT_TOPIC", "#"),
-            username = _get("MQTT_USERNAME", ""),
-            password = _get("MQTT_PASSWORD", ""),
+            host           = _get("MQTT_HOST", "localhost"),
+            port           = int(_get("MQTT_PORT", "1883")),
+            topic          = _get("MQTT_TOPIC", "#"),
+            username       = _get("MQTT_USERNAME", ""),
+            password       = _get("MQTT_PASSWORD", ""),
+            retry_interval = int(_get("MQTT_RETRY_INTERVAL", "5")),
+            max_retries    = int(_get("MQTT_MAX_RETRIES", "0")),
         )
 
 
@@ -54,14 +58,26 @@ class MQTTConfig:
 class QueueConfig:
     path:               Path = Path("./pq/persistent_queue.jsonl")
     size_limit_enabled: bool = True
-    max_bytes:          int  = 100 * 1024 * 1024   # Applied only when size_limit_enabled=True
+    max_bytes:          int  = 100 * 1024 * 1024   # size_limit_enabled=True 일 때만 적용됨
+
+    # 최소 용량(MIN_MAX_MB)은 1MB로 설정
+    MIN_MAX_MB = 1
 
     @classmethod
     def from_env(cls) -> "QueueConfig":
+        size_limit_enabled = _get_bool("PQ_SIZE_LIMIT_ENABLED", True)
+        max_mb = int(_get("PQ_MAX_MB", "100"))
+        if size_limit_enabled and max_mb < cls.MIN_MAX_MB:
+            logging.getLogger("config").warning(
+                f"PQ_MAX_MB={max_mb} is below the minimum ({cls.MIN_MAX_MB}MB). "
+                f"Clamping to {cls.MIN_MAX_MB}MB."
+            )
+            max_mb = cls.MIN_MAX_MB
+
         return cls(
             path               = Path(_get("PQ_PATH", "./pq/persistent_queue.jsonl")),
-            size_limit_enabled = _get_bool("PQ_SIZE_LIMIT_ENABLED", True),
-            max_bytes          = int(_get("PQ_MAX_MB", "100")) * 1024 * 1024,
+            size_limit_enabled = size_limit_enabled,
+            max_bytes          = max_mb * 1024 * 1024,
         )
 
 
@@ -105,14 +121,18 @@ class DBConfig:
 
 @dataclass
 class LoaderConfig:
-    batch_size:    int = 500
-    poll_interval: int = 5
+    batch_size:     int = 500
+    poll_interval:  int = 5
+    retry_interval: int = 5   # DB 연결/재연결 실패 시 재시도 대기(초)
+    max_retries:    int = 0   # 0 = 무한 재시도(운영 기본값). N>0 이면 N회 연속 실패 시 loader를 중단합니다.
 
     @classmethod
     def from_env(cls) -> "LoaderConfig":
         return cls(
-            batch_size    = int(_get("BATCH_SIZE", "500")),
-            poll_interval = int(_get("POLL_INTERVAL", "5")),
+            batch_size     = int(_get("BATCH_SIZE", "500")),
+            poll_interval  = int(_get("POLL_INTERVAL", "5")),
+            retry_interval = int(_get("LOADER_RETRY_INTERVAL", "5")),
+            max_retries    = int(_get("LOADER_MAX_RETRIES", "0")),
         )
 
 
