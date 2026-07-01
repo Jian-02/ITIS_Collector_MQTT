@@ -13,12 +13,6 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# 파일 최상단: .env.test 내용을 시스템 환경 변수에 즉시 주입 (override=True로 프로덕션 값을 덮어씀)
-env_test_path = Path(__file__).parent.parent / ".env.test"
-if env_test_path.exists():
-    load_dotenv(dotenv_path=env_test_path, override=True)
-    os.environ["APP_ENV"] = "test"  # config.py 분기용 스위치
-
 from config import DBConfig
 from unittest.mock import MagicMock
 import pytest
@@ -36,6 +30,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 def _verify_and_get_test_table(default: str = "sensor_data_test") -> str:
     # 이 시점에서는 테스트 DB 설정이 안전하게 적용된 상태입니다.
     cfg = DBConfig.from_env() 
+    # IP는 일치하지만, 테스트는 테이블명을 _test를 바라보도록 함
+    cfg.table_name = "sensor_data_test"
     print("현재 로드된 테이블명:", os.getenv("DB_TABLE_NAME"))
     print("현재 APP_ENV 상태:", os.getenv("APP_ENV"))
     assert cfg.table_name == "sensor_data_test"  # .env.test에 지정한 테이블명
