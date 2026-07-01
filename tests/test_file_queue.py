@@ -20,7 +20,7 @@ from file_queue import FileQueue, QueueFullError
 
 @pytest.fixture
 def temp_queue_path():
-    path = "c:\\itis_collector_mqtt\\tests\\persistent_queue_test.jsonl"
+    path = "persistent_queue_test.jsonl"
     if os.path.exists(path):
         os.remove(path)
     yield Path(path)
@@ -30,7 +30,7 @@ def temp_queue_path():
         except Exception:
             pass
 
-def _make_queue(tmp: Path, size_limit_enabled=True, max_bytes=1024 * 1024) -> FileQueue:
+def _make_queue(tmp: Path, size_limit_enabled=True, max_bytes=1024 * 1024 * 10) -> FileQueue:
     cfg = QueueConfig(
         path=Path(tmp),
         size_limit_enabled=size_limit_enabled,
@@ -186,9 +186,7 @@ def test_crash_recovery_converts_pending_to_queued_on_init(temp_queue_path):
     q.peek()  # Pending 상태로 전환한 후, '크래시' 상황을 시뮬레이션
 
     # 재시작: 동일한 경로로 FileQueue 재생성
-    cfg = QueueConfig.from_env()
-    cfg.path = Path(temp_queue_path)
-    q2 = FileQueue(cfg)
+    q2 = _make_queue(temp_queue_path)
 
     objs = _raw_lines(q2)
     assert all(o["_s"] == "Q" for o in objs), "Pending remained after restart"
@@ -200,9 +198,7 @@ def test_crash_recovery_data_retrievable_after_restart(temp_queue_path):
     q.append({"v": 42})
     append_count = q.peek()  # '크래시' 상황을 시뮬레이션
 
-    cfg = QueueConfig.from_env()
-    cfg.path = Path(temp_queue_path)
-    q2 = FileQueue(cfg)
+    q2 = _make_queue(temp_queue_path)
 
     records = q2.peek()
     assert len(records) == len(existing) + len(append_count)
@@ -215,9 +211,7 @@ def test_crash_recovery_data_retrievable_after_restart(temp_queue_path):
 
 def test_append_raises_error_when_limit_exceeded(temp_queue_path):
     """큐의 최대 용량(max_bytes)을 초과하여 append 시 QueueFullError가 발생하여야 한다."""
-    cfg = QueueConfig.from_env()
-    cfg.path = Path(temp_queue_path)
-    q = FileQueue(cfg)
+    q = _make_queue(temp_queue_path)
 
     chunk = "x" * (q.max_bytes // 3)
 
@@ -229,9 +223,7 @@ def test_append_raises_error_when_limit_exceeded(temp_queue_path):
 
 def test_all_records_preserved_when_limit_disabled(temp_queue_path):
     """용량 제한이 없을 때(기본값) 많은 레코드를 추가해도 데이터 유실 없이 모두 보존되어야 한다."""
-    cfg = QueueConfig.from_env()
-    cfg.path = Path(temp_queue_path)
-    q = FileQueue(cfg)
+    q = _make_queue(temp_queue_path)
     for i in range(20):
         q.append({"i": i})
     records = q.flush()
@@ -242,9 +234,7 @@ def test_all_records_preserved_when_limit_disabled(temp_queue_path):
 
 def test_concurrent_appends_exact_match(temp_queue_path):
     """2~4개의 스레드와 소량의 데이터 사용 — 콘텐츠의 무결성(integrity)을 철저히 검증한다."""
-    cfg = QueueConfig.from_env()
-    cfg.path = Path(temp_queue_path)
-    q = FileQueue(cfg)
+    q = _make_queue(temp_queue_path)
     n_threads, per_thread = 4, 10
     errors, err_lock = [], threading.Lock()
     expected = set()
@@ -276,9 +266,7 @@ def test_concurrent_appends_exact_match(temp_queue_path):
 
 def test_high_concurrency_stress(temp_queue_path):
     """20개의 스레드와 대량의 데이터 사용 — 시스템 부하 상황에서 지연이나 에러가 발생하지 않는지 검증"""
-    cfg = QueueConfig.from_env()
-    cfg.path = Path(temp_queue_path)
-    q = FileQueue(cfg)
+    q = _make_queue(temp_queue_path)
     n_threads, per_thread = 20, 500
     errors, err_lock = [], threading.Lock()
     barrier = threading.Barrier(n_threads)
@@ -304,9 +292,7 @@ def test_high_concurrency_stress(temp_queue_path):
 
 def test_concurrent_append_and_flush(temp_queue_path):
     """append 스레드들과 flush 스레드를 동시에 실행하여 상호작용을 검증한다."""
-    cfg = QueueConfig.from_env()
-    cfg.path = Path(temp_queue_path)
-    q = FileQueue(cfg)
+    q = _make_queue(temp_queue_path)
     n_writers, per_writer = 3, 50
     errors, err_lock = [], threading.Lock()
     collected, coll_lock = [], threading.Lock()

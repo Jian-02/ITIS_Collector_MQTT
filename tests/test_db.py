@@ -151,7 +151,9 @@ class DBFailoverAndPQTest:
         bad_db_cfg = DBConfig.from_env()
         bad_db_cfg.host, bad_db_cfg.port = "invalid.host", 9999
         
-        queue = FileQueue(QueueConfig.from_env())
+        cfg = FileQueue(QueueConfig.from_env())
+        cfg.path = tmp_path / "queue_jsonl"
+        queue = FileQueue(cfg)
         queue.append({"topic": "test", "value": 23.5, "payload": {}})
 
         loader = DBLoader(bad_db_cfg, LoaderConfig(batch_size=1, poll_interval=1), queue)
@@ -159,8 +161,8 @@ class DBFailoverAndPQTest:
             loader._connect(max_attempts=1)
         
         # 파일 존재 여부 확인
-        assert QueueConfig.from_env().path.exists()
-        assert QueueConfig.from_env().path.stat().st_size > 0
+        assert cfg.path.exists()
+        assert cfg.path.stat().st_size > 0
 
     def test_existing_pq_data_is_inserted(self, clean_test_table):
         """기존 큐 데이터가 프로세스 실행 시 DB로 삽입되어야 합니다."""

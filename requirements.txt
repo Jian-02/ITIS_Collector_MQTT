@@ -10,4 +10,4 @@ pyodbc>=4.0.0             # MSSQL
 # Oracle Error
 
 # For Pytest
-pyteset-env>=1.6.0
+pytest-env>=1.6.0

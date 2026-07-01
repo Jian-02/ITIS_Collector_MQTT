@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 # ── Test DB Load ───────────────────────────────────────
-def test_db_loader(default: str = "sensor_data_test") -> str:
+def _verify_and_get_test_table(default: str = "sensor_data_test") -> str:
     # 이 시점에서는 테스트 DB 설정이 안전하게 적용된 상태입니다.
     cfg = DBConfig.from_env() 
     print("현재 로드된 테이블명:", os.getenv("DB_TABLE_NAME"))
@@ -100,7 +100,7 @@ def db_adapter():
     from loader import make_adapter
 
     cfg = DBConfig.from_env()
-    cfg.table_name = test_db_loader()
+    cfg.table_name = _verify_and_get_test_table()
     adapter = make_adapter(cfg)
 
     try:
